@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postcode_service
+      POSTGRES_USER: postcode
+      POSTGRES_PASSWORD: postcode
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postcode -d postcode_service']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
+
+  api:
+    build: .
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-3000}
+      DATABASE_URL: postgresql://postcode:postcode@postgres:5432/postcode_service
+      SANITIZE_ENABLED: ${SANITIZE_ENABLED:-true}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.8}
+      MODELS_DEFAULT_PROVIDER: ${MODELS_DEFAULT_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      MODEL_PROMPT_TEMPLATE: ${MODEL_PROMPT_TEMPLATE:-}
+      MODEL_CACHE_TTL_SECONDS: ${MODEL_CACHE_TTL_SECONDS:-86400}
+      MODEL_CACHE_MAX_ENTRIES: ${MODEL_CACHE_MAX_ENTRIES:-1000}
+      GEMINI_INPUT_PRICE_PER_MILLION_USD: ${GEMINI_INPUT_PRICE_PER_MILLION_USD:-1.5}
+      GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD: ${GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD:-0.15}
+      GEMINI_OUTPUT_PRICE_PER_MILLION_USD: ${GEMINI_OUTPUT_PRICE_PER_MILLION_USD:-9}
+      GEMINI_SEARCH_PRICE_PER_THOUSAND_USD: ${GEMINI_SEARCH_PRICE_PER_THOUSAND_USD:-14}
+      LOGS_API_KEY: ${LOGS_API_KEY:-}
+    ports:
+      - '${API_HOST_PORT:-3000}:${PORT:-3000}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
