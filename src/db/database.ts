@@ -5,6 +5,8 @@ import type {
   ResolutionLog,
   ResolutionLogQuery,
   ResolutionResponse,
+  ResolutionStats,
+  ResolutionStatsQuery,
   ResolutionUsage,
 } from '../types.js';
 
@@ -41,6 +43,7 @@ export class Database {
 
   async writeResolutionLog(input: {
     id: string;
+    resourceId: string;
     requestAddress: string;
     requestPhone: string;
     sanitizedAddress: string;
@@ -54,14 +57,15 @@ export class Database {
   }): Promise<void> {
     await this.pool.query(
       `INSERT INTO resolution_logs
-       (id, request_address, request_phone, sanitized_address, sanitize_enabled, provider, model,
+       (id, resource_id, request_address, request_phone, sanitized_address, sanitize_enabled, provider, model,
         status, confidence_score, result, detected_rules, cache_hit, latency_ms, prompt_tokens,
         cached_prompt_tokens, output_tokens, thinking_tokens, tool_tokens, total_tokens,
         search_queries, estimated_list_cost_usd, error_code)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13,
-               $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13,
+               $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
       [
         input.id,
+        input.resourceId,
         input.requestAddress,
         input.requestPhone,
         input.sanitizedAddress,
@@ -102,6 +106,7 @@ export class Database {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await this.pool.query<ResolutionLog>(
       `SELECT id,
+              resource_id AS "resourceId",
               request_address AS "requestAddress",
               request_phone AS "requestPhone",
               sanitized_address AS "sanitizedAddress",
@@ -131,6 +136,62 @@ export class Database {
       values,
     );
     return result.rows;
+  }
+
+  async getResolutionStats(query: ResolutionStatsQuery): Promise<ResolutionStats> {
+    const values: Array<Date | number> = [];
+    const conditions: string[] = [];
+    if (query.from) {
+      values.push(query.from);
+      conditions.push(`created_at >= $${values.length}`);
+    }
+    if (query.to) {
+      values.push(query.to);
+      conditions.push(`created_at <= $${values.length}`);
+    }
+    values.push(query.limit);
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await this.pool.query<{
+      total: string;
+      successCount: string;
+      ambiguousCount: string;
+      failedCount: string;
+      firstLogAt: Date | null;
+      lastLogAt: Date | null;
+    }>(
+      `WITH selected_logs AS (
+         SELECT status, created_at
+         FROM resolution_logs
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT $${values.length}
+       )
+       SELECT count(*) AS total,
+              count(*) FILTER (WHERE status = 'SUCCESS') AS "successCount",
+              count(*) FILTER (WHERE status = 'AMBIGUOUS') AS "ambiguousCount",
+              count(*) FILTER (WHERE status = 'FAILED') AS "failedCount",
+              min(created_at) AS "firstLogAt",
+              max(created_at) AS "lastLogAt"
+       FROM selected_logs`,
+      values,
+    );
+    const row = result.rows[0];
+    const total = Number(row?.total ?? 0);
+    const successCount = Number(row?.successCount ?? 0);
+    const ambiguousCount = Number(row?.ambiguousCount ?? 0);
+    const failedCount = Number(row?.failedCount ?? 0);
+    const failureCount = ambiguousCount + failedCount;
+    return {
+      total,
+      successCount,
+      failureCount,
+      ambiguousCount,
+      failedCount,
+      successRate: total ? successCount / total : 0,
+      failureRate: total ? failureCount / total : 0,
+      firstLogAt: row?.firstLogAt ?? null,
+      lastLogAt: row?.lastLogAt ?? null,
+    };
   }
 
   async close(): Promise<void> {

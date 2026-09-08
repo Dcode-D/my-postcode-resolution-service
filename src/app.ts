@@ -1,4 +1,4 @@
-import express, { type ErrorRequestHandler } from 'express';
+import express, { type ErrorRequestHandler, type RequestHandler } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -8,7 +8,11 @@ import { ZodError } from 'zod';
 import type { AppConfig } from './config.js';
 import type { Database } from './db/database.js';
 import type { ResolutionService } from './services/resolution-service.js';
-import { resolutionLogQuerySchema, resolutionRequestSchema } from './types.js';
+import {
+  resolutionLogQuerySchema,
+  resolutionRequestSchema,
+  resolutionStatsQuerySchema,
+} from './types.js';
 
 function matchesApiKey(actual: string | undefined, expected: string): boolean {
   if (!actual) return false;
@@ -43,6 +47,18 @@ export function createApp(
     }),
   );
 
+  const requireLogAccess: RequestHandler = (request, response, next) => {
+    if (!config.LOGS_API_KEY) {
+      response.status(503).json({ status: 'FAILED', error: 'Log endpoint is not configured' });
+      return;
+    }
+    if (!matchesApiKey(request.header('x-api-key'), config.LOGS_API_KEY)) {
+      response.status(401).json({ status: 'FAILED', error: 'Unauthorized' });
+      return;
+    }
+    next();
+  };
+
   app.get('/health', async (_request, response, next) => {
     try {
       await database.healthcheck();
@@ -62,16 +78,8 @@ export function createApp(
     }
   });
 
-  app.get('/v1/resolution-logs', async (request, response, next) => {
+  app.get('/v1/resolution-logs', requireLogAccess, async (request, response, next) => {
     try {
-      if (!config.LOGS_API_KEY) {
-        response.status(503).json({ status: 'FAILED', error: 'Log endpoint is not configured' });
-        return;
-      }
-      if (!matchesApiKey(request.header('x-api-key'), config.LOGS_API_KEY)) {
-        response.status(401).json({ status: 'FAILED', error: 'Unauthorized' });
-        return;
-      }
       const query = resolutionLogQuerySchema.parse(request.query);
       const logs = await database.listResolutionLogs(query);
       response.status(200).json({
@@ -81,6 +89,33 @@ export function createApp(
           limit: query.limit,
           from: query.from?.toISOString() ?? null,
           to: query.to?.toISOString() ?? null,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/v1/resolution-stats', requireLogAccess, async (request, response, next) => {
+    try {
+      const query = resolutionStatsQuerySchema.parse(request.query);
+      const stats = await database.getResolutionStats(query);
+      response.status(200).json({
+        data: {
+          total: stats.total,
+          success: { count: stats.successCount, rate: stats.successRate },
+          failure: { count: stats.failureCount, rate: stats.failureRate },
+          breakdown: {
+            ambiguous: stats.ambiguousCount,
+            failed: stats.failedCount,
+          },
+        },
+        meta: {
+          limit: query.limit,
+          from: query.from?.toISOString() ?? null,
+          to: query.to?.toISOString() ?? null,
+          first_log_at: stats.firstLogAt?.toISOString() ?? null,
+          last_log_at: stats.lastLogAt?.toISOString() ?? null,
         },
       });
     } catch (error) {

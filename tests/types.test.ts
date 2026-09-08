@@ -3,11 +3,24 @@ import { resolvedAddressSchema, resolutionRequestSchema } from '../src/types.js'
 
 describe('country-aware API schemas', () => {
   it('does not require the caller to know the country', () => {
-    expect(resolutionRequestSchema.parse({ address: 'Sample address', phone: '123456' })).toEqual({
+    expect(
+      resolutionRequestSchema.parse({
+        resource_id: 'shipment-123',
+        address: 'Sample address',
+        phone: '123456',
+      }),
+    ).toEqual({
+      resource_id: 'shipment-123',
       address: 'Sample address',
       phone: '123456',
       debug: false,
     });
+  });
+
+  it('requires a resource id for audit logging', () => {
+    expect(() =>
+      resolutionRequestSchema.parse({ address: 'Sample address', phone: '123456' }),
+    ).toThrow();
   });
 
   it('accepts non-Malaysian postal-code formats', () => {

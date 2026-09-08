@@ -1,32 +1,36 @@
-# Malaysia Postcode Resolution Service
+# Postcode Resolution Service
 
-API Node.js/TypeScript nhận `address` và `phone`, chuẩn hoá địa chỉ (có thể tắt), phát hiện postcode/zone code, dùng model provider để đánh giá và trả postcode cùng confidence. Mọi lần gọi đều được audit vào PostgreSQL.
+A Node.js and TypeScript API that accepts an address and phone number, identifies the country, resolves the most likely postal code, and returns a confidence score. Gemini can use Google Search grounding to verify results. Every resolution is audited in PostgreSQL.
 
-## Khởi chạy ngay bằng Docker
+## Quick start with Docker
 
-Mặc định dùng provider `mock` quyết định được (không cần Gemini key), thích hợp để kiểm tra toàn bộ flow.
+The default provider is `mock`, which requires no Gemini API key and is useful for checking the application flow.
 
 ```bash
 docker compose up --build
 ```
 
-Migration `001_initial.sql` và development seed tự chạy trước khi API mở cổng. Gọi thử:
-
-Các port host được cấu hình trong `.env`: `API_HOST_PORT` (mặc định `3000`) và `POSTGRES_HOST_PORT` (mặc định `5432`). `PORT` là port bên trong API container. Ví dụ đặt `API_HOST_PORT=8080` thì gọi API tại `http://localhost:8080`. Nếu chạy API bằng `npm run dev` ngoài Docker và đổi port PostgreSQL, cập nhật `DATABASE_URL` tương ứng.
-
-Docker dùng named volume `postgres_data`, vì vậy `docker compose up --build`, `docker compose restart` và `docker compose down` không làm mất dữ liệu. Chỉ `docker compose down -v` hoặc xoá volume `postgres_data` mới xoá database. Migration runner ghi nhận migration đã chạy trong `schema_migrations`, nên chỉ áp dụng file SQL migration mới.
+The API is available at `http://localhost:3000` by default. Check its health with:
 
 ```bash
-curl -X POST http://localhost:3000/v1/postcode/resolve \
-  -H 'content-type: application/json' \
-  -d '{"address":"19, Jln 1F/KU11, Tmn Desa Baiduri, Off Jlan Iskandar","phone":"0176710714","debug":true}'
+curl http://localhost:3000/health
 ```
 
-Kết quả development seed cho ví dụ trên là `42200`, `KAPAR`, `SELANGOR`, confidence `0.95`. `debug_info` chỉ xuất hiện khi gửi `debug: true`, để không trả chi tiết nội bộ mặc định.
+The container automatically runs all unapplied SQL migrations and the development seed before starting the API. Applied migrations are tracked in `schema_migrations`.
 
-## Dùng Gemini
+Host ports are configured through `.env`:
 
-Tạo `.env` từ `.env.example`, sau đó đặt:
+- `API_HOST_PORT` defaults to `3000`.
+- `POSTGRES_HOST_PORT` defaults to `5432`.
+- `PORT` is the port used inside the API container.
+
+For example, setting `API_HOST_PORT=8080` exposes the API at `http://localhost:8080` while it can continue listening on port `3000` inside the container.
+
+PostgreSQL uses the named volume `postgres_data`. `docker compose restart`, `docker compose down`, and rebuilding the containers do not remove this data. Running `docker compose down -v` deletes the database volume.
+
+## Using Gemini
+
+Copy `.env.example` to `.env`, then configure:
 
 ```dotenv
 MODELS_DEFAULT_PROVIDER=gemini
@@ -36,53 +40,188 @@ CONFIDENCE_THRESHOLD=0.80
 SANITIZE_ENABLED=true
 ```
 
-Chạy lại `docker compose up --build`. Gemini provider dùng Google Search grounding để tự xác định country và postal code từ address; phone country/area code được dùng như một clue với confidence thấp hơn, không phải bằng chứng street-level. Việc search có thể phát sinh chi phí Grounding của Gemini API. `MODEL_PROMPT_TEMPLATE` có thể override prompt tích hợp; các placeholder hỗ trợ là `{{address}}`, `{{phone}}`, `{{detected_rules}}`.
+Rebuild the API after changing the environment:
 
-Provider dùng minimal thinking, giới hạn output và cache kết quả theo toàn bộ prompt (address + phone) trong memory. Mặc định cache giữ tối đa `1000` kết quả trong `86400` giây; chỉnh bằng `MODEL_CACHE_MAX_ENTRIES` và `MODEL_CACHE_TTL_SECONDS`, hoặc đặt TTL `0` để tắt. Các request trùng nhau đang chạy cũng được gộp thành một Gemini call.
+```bash
+docker compose up -d --build
+```
 
-## API contract
+The Gemini provider uses Google Search grounding to infer the country and postal code from the address. A phone country code or landline area code may be used as a weak clue, but it is not treated as proof of a street-level location.
+
+The provider uses minimal thinking, limits output size, and asks the model to use the minimum number of searches needed. Google Search grounding may incur Gemini API charges.
+
+### Model-result cache
+
+Successful high-confidence results are cached in memory using the complete rendered prompt, including the address and phone number. Simultaneous identical requests are combined into one model request.
+
+```dotenv
+MODEL_CACHE_TTL_SECONDS=86400
+MODEL_CACHE_MAX_ENTRIES=1000
+```
+
+The default cache lifetime is 24 hours with a maximum of 1,000 entries. Set `MODEL_CACHE_TTL_SECONDS=0` to disable caching. The cache is cleared whenever the API process or container restarts.
+
+### Custom prompt
+
+Set `MODEL_PROMPT_TEMPLATE` to replace the built-in prompt. The supported placeholders are:
+
+- `{{address}}`
+- `{{phone}}`
+- `{{detected_rules}}`
+
+## API
+
+### Resolve an address
 
 `POST /v1/postcode/resolve`
 
+```bash
+curl -X POST http://localhost:3000/v1/postcode/resolve \
+  -H 'content-type: application/json' \
+  -d '{"resource_id":"shipment-123","address":"16 Lebuh Tenggiri 2, Seberang Jaya","phone":"0176710714","debug":true}'
+```
+
+Request body:
+
 ```json
 {
-  "address": "19, Jln 1F/KU11, Tmn Desa Baiduri",
+  "resource_id": "shipment-123",
+  "address": "16 Lebuh Tenggiri 2, Seberang Jaya",
   "phone": "0176710714",
   "debug": true
 }
 ```
 
-Client chỉ cần gửi address và phone. Model tự tìm country, ISO country code và postal code; postcode validator hỗ trợ cả format chữ-số như `SW1A 2AA`.
+`resource_id` is a required caller-provided identifier of up to 128 characters. It is stored in `resolution_logs` for correlation only; it is not sent to Gemini and is not included in the resolution response.
 
-- `SUCCESS`: model tìm được postcode và confidence >= `CONFIDENCE_THRESHOLD`.
-- `AMBIGUOUS`: model không verify được postcode hoặc confidence dưới ngưỡng; client phải review/fallback.
-- `FAILED`: provider hoặc persistence thất bại; API trả HTTP 502.
+The model determines the country, ISO alpha-2 country code, and postal code. Postal codes may contain letters, digits, spaces, and hyphens, so formats such as `SW1A 2AA` are supported.
 
-Response có `confidence_score`, `data` (địa chỉ, postcode, country và country code) và, nếu được yêu cầu, `debug_info.detected_rules`. Usage/cost không được đưa ra public response. `central_postcode` hiện bằng postcode được chọn, là điểm extension cho logistics fallback.
+Possible statuses:
 
-Usage được lưu riêng trong audit log: provider/model, cache hit, model latency, prompt/cached/output/thinking/tool/total tokens, số Google Search queries và `estimated_list_cost_usd`. Cost là estimate theo list price cấu hình, không phải invoice thực tế; free quota, discount và service tier chưa được trừ. Default rate hiện dành cho `gemini-3.5-flash` Standard: input `$1.50/M`, cached input `$0.15/M`, output + thinking `$9/M`, Search `$14/1000`. Khi đổi model, tier hoặc Google đổi giá, cập nhật các biến `GEMINI_*_PRICE_*` trong `.env`.
+- `SUCCESS`: a postal code was returned with confidence greater than or equal to `CONFIDENCE_THRESHOLD`.
+- `AMBIGUOUS`: no postal code could be resolved, or confidence is below the threshold.
+- `FAILED`: the provider or persistence operation failed; the API returns HTTP 502.
+
+Example response:
+
+```json
+{
+  "status": "SUCCESS",
+  "confidence_score": 0.91,
+  "data": {
+    "address_line1": "16 LEBUH TENGGIRI 2",
+    "district": "SEBERANG PERAI TENGAH",
+    "city": "SEBERANG JAYA",
+    "state": "PULAU PINANG",
+    "postcode": "13700",
+    "central_postcode": "13700",
+    "country": "MALAYSIA",
+    "country_code": "MY",
+    "phone": "+60176710714"
+  },
+  "debug_info": {
+    "detected_rules": [],
+    "provider": "gemini",
+    "model": "gemini-3.5-flash"
+  }
+}
+```
+
+`debug_info` is included only when the request contains `"debug": true`. Usage and cost information is never included in this public response.
 
 ### Audit logs
 
-`GET /v1/resolution-logs` trả 100 bản ghi mới nhất theo mặc định. Usage/cost được lưu cả trong result JSON và các column riêng để query/report. Vì logs chứa PII, endpoint chỉ được bật khi có `LOGS_API_KEY` (ít nhất 16 ký tự) trong `.env`; gọi bằng header `x-api-key` tương ứng.
+`GET /v1/resolution-logs`
+
+The endpoint returns the newest 100 records by default. Because resolution logs contain personally identifiable information, this endpoint is enabled only when `LOGS_API_KEY` is set to a value of at least 16 characters.
 
 ```bash
 curl 'http://localhost:3000/v1/resolution-logs?limit=100&from=2026-09-01T00:00:00Z&to=2026-09-07T23:59:59Z' \
   -H 'x-api-key: your-strong-logs-key'
 ```
 
-`from` và `to` là ISO-8601, đều optional; `limit` từ 1–1000. Kết quả luôn sort `createdAt` giảm dần.
+Query parameters:
 
-## Cấu trúc và dữ liệu tham chiếu
+- `from`: optional ISO-8601 start time.
+- `to`: optional ISO-8601 end time.
+- `limit`: between 1 and 1,000; defaults to 100.
 
-- `src/lib/address.ts`: sanitizer trung lập ngôn ngữ và detector postcode dạng 5 chữ số.
-- `src/providers/`: interface chung; `GeminiProvider` và `MockProvider` độc lập, có thể thêm OpenAI/Anthropic mà không đổi route.
-- `malaysia_postcode_references`: bảng nguồn đối soát. Seed chỉ là data phát triển, **không phải** toàn bộ cơ sở dữ liệu Pos Malaysia.
-- `resolution_logs`: audit log input, phiên bản provider/model, data kết quả, confidence, rule, error code.
+Results are ordered by `createdAt` in descending order.
 
-Trước production cần import nguồn Pos Malaysia có quyền sử dụng vào bảng reference, thêm version/source/coverage check cho dataset, mã hoá hay tokenise phone/address theo chính sách PDPA và cấu hình retention cho `resolution_logs`.
+Usage information is stored only in the audit log. Dedicated database columns record:
 
-Gemini dùng SDK hiện hành `@google/genai`. Nếu provider trả `FAILED`, xem `docker compose logs api --tail=100`; log chỉ gồm model và lỗi Gemini, không gồm API key, address hoặc phone.
+- Cache hit and model latency.
+- Prompt, cached-prompt, output, thinking, tool, and total tokens.
+- Google Search query count.
+- Estimated list cost in USD.
+
+The cost is an estimate based on configured list prices, not the final Gemini invoice. Free quotas, discounts, and service-tier pricing are not deducted. The defaults target `gemini-3.5-flash` Standard pricing:
+
+```dotenv
+GEMINI_INPUT_PRICE_PER_MILLION_USD=1.5
+GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD=0.15
+GEMINI_OUTPUT_PRICE_PER_MILLION_USD=9
+GEMINI_SEARCH_PRICE_PER_THOUSAND_USD=14
+```
+
+Update these values whenever the model, service tier, or Gemini pricing changes.
+
+### Resolution statistics
+
+`GET /v1/resolution-stats`
+
+This endpoint uses the same `x-api-key` authentication as the audit-log endpoint. It calculates rates from the newest 1,000 matching logs by default.
+
+```bash
+curl 'http://localhost:3000/v1/resolution-stats?limit=1000&from=2026-09-01T00:00:00Z&to=2026-09-08T23:59:59Z' \
+  -H 'x-api-key: your-strong-logs-key'
+```
+
+Example response:
+
+```json
+{
+  "data": {
+    "total": 1000,
+    "success": { "count": 800, "rate": 0.8 },
+    "failure": { "count": 200, "rate": 0.2 },
+    "breakdown": {
+      "ambiguous": 150,
+      "failed": 50
+    }
+  },
+  "meta": {
+    "limit": 1000,
+    "from": null,
+    "to": null,
+    "first_log_at": "2026-09-01T00:00:00.000Z",
+    "last_log_at": "2026-09-08T23:59:59.000Z"
+  }
+}
+```
+
+`SUCCESS` is counted as success. `AMBIGUOUS` and `FAILED` are both counted as failure and are also returned as separate breakdown values. Rates are numbers from `0` through `1`.
+
+Query parameters:
+
+- `from`: optional ISO-8601 start time.
+- `to`: optional ISO-8601 end time.
+- `limit`: between 1 and 100,000; defaults to 1,000.
+
+The time filters are applied first, followed by descending date order and the sample limit.
+
+## Project structure
+
+- `src/app.ts`: Express routes, middleware, authentication, and error handling.
+- `src/config.ts`: environment parsing and validation.
+- `src/db/database.ts`: PostgreSQL queries and audit persistence.
+- `src/lib/address.ts`: country-neutral address normalization and simple five-digit postcode detection.
+- `src/lib/prompt.ts`: the default Gemini prompt and template rendering.
+- `src/providers/`: the provider interface plus Gemini and deterministic mock implementations.
+- `src/services/resolution-service.ts`: resolution orchestration, caching, confidence status, usage accounting, and audit logging.
+- `migrations/`: ordered PostgreSQL schema migrations.
+- `malaysia_postcode_references`: development reference table containing only a small seed dataset, not the complete Pos Malaysia database.
+- `resolution_logs`: resolution audit records, provider usage, estimated cost, and error details.
 
 ## Local development
 
@@ -94,18 +233,27 @@ npm run seed
 npm run dev
 ```
 
-Các kiểm tra: `npm run check`.
+Run all checks with:
 
-## Sprint 1 plan (2 tuần)
+```bash
+npm run check
+```
 
-**Mục tiêu:** MVP nội bộ chạy Docker, trả postcode Malaysia có trace/audit, Gemini có thể bật qua cấu hình.
+## Production considerations
 
-| Nhóm việc                    | Deliverable                                                              | Tiêu chí hoàn thành                                             |
-| ---------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Foundation (Ngày 1–2)        | Repo, TypeScript strict, Docker Compose, health check, CI cơ bản         | `docker compose up --build` chạy migration và `/health` trả 200 |
-| Address pipeline (Ngày 3–4)  | Sanitize toggle, từ điển Malay, regex postcode, zone `KU<n>`             | Unit test các trường hợp Jln/Tmn/Kg/KU và tắt sanitize          |
-| Reference & audit (Ngày 5–6) | PostgreSQL schema, migration runner, postcode lookup, resolution log     | Mỗi request có một row log, postcode input được đối soát DB     |
-| Model integration (Ngày 7–8) | `ModelProvider`, Gemini JSON mode, prompt/config/threshold               | Có thể đổi mock/Gemini qua env, schema model bị validate        |
-| API & quality (Ngày 9–10)    | Contract 3 trạng thái, error handling, redacted request log, README/demo | Test green; happy path và ambiguous/failed có tài liệu          |
+Before production use:
 
-**Ngoài Sprint 1 / đề xuất Sprint 2:** ingest toàn bộ dữ liệu Post Malaysia được cấp phép, mapping nhiều zone/state, cache/rate limit/API auth, evaluation dataset + human review queue, PII retention/encryption, metrics/tracing và CI/CD deploy.
+- Import properly licensed postal-reference data where local validation is required.
+- Add rate limiting and authentication to the public resolution endpoint.
+- Define retention, encryption, or tokenization policies for addresses and phone numbers under applicable privacy laws.
+- Keep `LOGS_API_KEY` secret and restrict access to audit endpoints.
+- Review model and Google Search pricing configuration regularly.
+- Add metrics, tracing, evaluation datasets, a human-review workflow, and CI/CD deployment.
+
+Gemini uses the current `@google/genai` SDK. If the provider returns `FAILED`, inspect the API logs:
+
+```bash
+docker compose logs api --tail=100
+```
+
+Provider errors do not intentionally log the Gemini API key, address, phone number, or rendered prompt.

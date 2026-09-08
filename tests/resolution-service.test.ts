@@ -70,6 +70,7 @@ describe('ResolutionService', () => {
       ...pricing,
     });
     const result = await service.resolve({
+      resource_id: 'shipment-my-001',
       address: '16 No, 16 Lebuh Tenggiri 2 Seberang Jaya',
       phone: '0176710714',
       debug: true,
@@ -78,6 +79,7 @@ describe('ResolutionService', () => {
     expect(result.confidence_score).toBe(0.92);
     expect(result.data?.postcode).toBe('13700');
     expect(result.data?.country_code).toBe('MY');
+    expect(logs.at(-1)?.resourceId).toBe('shipment-my-001');
     expect(result).not.toHaveProperty('usage');
     expect(logs.at(-1)?.usage).toMatchObject({
       prompt_tokens: 100,
@@ -122,6 +124,7 @@ describe('ResolutionService', () => {
     });
 
     const result = await service.resolve({
+      resource_id: 'shipment-gb-001',
       address: '10 Downing Street, London',
       phone: '+44 20 7925 0918',
       debug: true,
@@ -151,15 +154,17 @@ describe('ResolutionService', () => {
       ...pricing,
     });
     const request = {
+      resource_id: 'shipment-cache-001',
       address: '16 No, 16 Lebuh Tenggiri 2 Seberang Jaya',
       phone: '0176710714',
       debug: true,
     } as const;
 
     const first = await service.resolve(request);
-    const second = await service.resolve(request);
+    const second = await service.resolve({ ...request, resource_id: 'shipment-cache-002' });
 
     expect(calls).toBe(1);
+    expect(logs.at(-1)?.resourceId).toBe('shipment-cache-002');
     expect(first.debug_info?.detected_rules).toContain('MODEL_CACHE_HIT:false');
     expect(second.debug_info?.detected_rules).toContain('MODEL_CACHE_HIT:true');
     expect(second).not.toHaveProperty('usage');

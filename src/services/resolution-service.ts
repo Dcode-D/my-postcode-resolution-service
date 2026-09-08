@@ -38,6 +38,7 @@ export interface ResolutionStore {
   findPostcodeByRegion(state: string, city: string): Promise<PostcodeReference | null>;
   writeResolutionLog(input: {
     id: string;
+    resourceId: string;
     requestAddress: string;
     requestPhone: string;
     sanitizedAddress: string;
@@ -187,6 +188,7 @@ export class ResolutionService {
       };
       await this.database.writeResolutionLog({
         id: requestId,
+        resourceId: request.resource_id,
         requestAddress: request.address,
         requestPhone: request.phone,
         sanitizedAddress: address.value,
@@ -218,6 +220,7 @@ export class ResolutionService {
       };
       await this.database.writeResolutionLog({
         id: requestId,
+        resourceId: request.resource_id,
         requestAddress: request.address,
         requestPhone: request.phone,
         sanitizedAddress: address.value,

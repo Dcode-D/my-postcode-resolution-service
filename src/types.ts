@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const resolutionRequestSchema = z.object({
+  resource_id: z.string().trim().min(1).max(128),
   address: z.string().trim().min(5).max(500),
   phone: z.string().trim().min(6).max(30),
   debug: z.boolean().optional().default(false),
@@ -77,6 +78,31 @@ export const resolutionLogQuerySchema = z
 
 export type ResolutionLogQuery = z.infer<typeof resolutionLogQuerySchema>;
 
+export const resolutionStatsQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100000).default(1000),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+  })
+  .refine((value) => !value.from || !value.to || value.from <= value.to, {
+    message: 'from must be before or equal to to',
+    path: ['from'],
+  });
+
+export type ResolutionStatsQuery = z.infer<typeof resolutionStatsQuerySchema>;
+
+export interface ResolutionStats {
+  total: number;
+  successCount: number;
+  failureCount: number;
+  ambiguousCount: number;
+  failedCount: number;
+  successRate: number;
+  failureRate: number;
+  firstLogAt: Date | null;
+  lastLogAt: Date | null;
+}
+
 export interface ResolutionResponse {
   status: ResolutionStatus;
   confidence_score: number;
@@ -93,6 +119,7 @@ export interface PostcodeReference {
 
 export interface ResolutionLog {
   id: string;
+  resourceId: string | null;
   requestAddress: string;
   requestPhone: string;
   sanitizedAddress: string;
