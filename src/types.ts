@@ -123,6 +123,16 @@ export interface ModelPricingSettings {
   searchPricePerThousandUsd: number;
 }
 
+export type AiProviderName = 'gemini' | 'openai' | 'deepseek' | 'mock';
+
+export interface AiProviderSettings {
+  provider: AiProviderName;
+  apiKey: string | null;
+  model: string;
+  baseUrl: string | null;
+  priority: number;
+}
+
 export interface ResolutionResponse {
   status: ResolutionStatus;
   confidence_score: number;

@@ -1,16 +1,16 @@
 # Postcode Resolution Service
 
-A Node.js and TypeScript API that accepts an address, phone number, and optional international calling code, resolves the most likely postal code, and returns a confidence score. Gemini can use Google Search grounding to verify results. Every resolution is audited in PostgreSQL.
+A Node.js and TypeScript API that accepts an address, phone number, and optional international calling code, resolves the most likely postal code, and returns a confidence score. Gemini and OpenAI can use hosted web search to verify results. Every resolution is audited in PostgreSQL.
 
 ## Quick start with Docker
 
-The default provider is `mock`, which requires no Gemini API key and is useful for checking the application flow.
+The default provider is `mock`, which requires no API key and is useful for checking the application flow.
 
 ```bash
 docker compose up --build
 ```
 
-The API is available at `http://localhost:3000` by default. Check its health with:
+Nginx exposes the service at `http://localhost:3000` by default and proxies requests to the private API container. Check its health with:
 
 ```bash
 curl http://localhost:3000/health
@@ -20,35 +20,90 @@ The container automatically runs all unapplied SQL migrations and the developmen
 
 Host ports are configured through `.env`:
 
-- `API_HOST_PORT` defaults to `3000`.
+- `NGINX_BIND_ADDRESS` controls which host interfaces accept traffic and defaults to `0.0.0.0`.
+- `NGINX_HOST_PORT` is the public Nginx host port and defaults to `3000`.
 - `POSTGRES_HOST_PORT` defaults to `5432`.
-- `PORT` is the port used inside the API container.
+- `PORT` is the private port shared by the API container and Nginx upstream configuration.
 
-For example, setting `API_HOST_PORT=8080` exposes the API at `http://localhost:8080` while it can continue listening on port `3000` inside the container.
+For example, setting `NGINX_BIND_ADDRESS=0.0.0.0` and `NGINX_HOST_PORT=8080` exposes Nginx on port 8080 across the host's network interfaces, while the API continues listening privately on port `3000` inside the Compose network. Set `NGINX_BIND_ADDRESS=127.0.0.1` to make it accessible only from the Docker host. The old `API_HOST_PORT` value remains a fallback when `NGINX_HOST_PORT` is not set.
+
+Publishing on `0.0.0.0` makes the port reachable only where the host firewall, router, and cloud security rules permit it. Public internet exposure still requires those external network rules and should normally use TLS in front of this HTTP listener.
+
+### Nginx request controls
+
+Nginx applies rate and connection limits only to `POST /v1/postcode/resolve`; health, documentation, audit, statistics, and configuration-reload routes remain available through the same proxy. Rejected resolution requests receive an HTTP 429 JSON response with a `Retry-After` header.
+
+```dotenv
+NGINX_RESOLVE_RATE=5r/s
+NGINX_RESOLVE_BURST=10
+NGINX_RESOLVE_CONNECTIONS_PER_IP=5
+NGINX_RESOLVE_CONNECTIONS_TOTAL=50
+NGINX_PROXY_TIMEOUT=120s
+```
+
+- `NGINX_RESOLVE_RATE` controls the average accepted rate per client IP.
+- `NGINX_RESOLVE_BURST` allows short bursts above that rate without delaying requests.
+- `NGINX_RESOLVE_CONNECTIONS_PER_IP` limits simultaneous resolution requests from one IP.
+- `NGINX_RESOLVE_CONNECTIONS_TOTAL` limits simultaneous resolution requests across this Nginx instance.
+- `NGINX_PROXY_TIMEOUT` allows long-running provider searches to finish before Nginx times out.
+
+These limits protect the HTTP edge but are not a provider-aware concurrency semaphore. If the API is later replicated across several hosts or Nginx instances, use an application or distributed limiter to enforce one quota across all replicas. When another load balancer sits in front of Nginx, configure trusted real-IP handling before relying on per-IP limits.
 
 PostgreSQL uses the named volume `postgres_data`. `docker compose restart`, `docker compose down`, and rebuilding the containers do not remove this data. Running `docker compose down -v` deletes the database volume.
 
-## Using Gemini
+## AI providers
 
-Copy `.env.example` to `.env`, then configure:
+The service supports `gemini`, `openai`, `deepseek`, and `mock`. Every enabled row in `ai_provider_settings` is loaded in ascending numeric `priority` order. For each resolution request, the service calls providers in that order and stops as soon as one returns a valid model response. A valid low-confidence response still ends the provider chain and may produce the business status `AMBIGUOUS`; failover occurs only when a provider throws or returns an invalid response.
+
+When no database row is enabled, the single provider selected by `MODELS_DEFAULT_PROVIDER` and its environment variables is used as the fallback configuration.
+
+For example, enable OpenAI from PostgreSQL:
+
+```sql
+UPDATE ai_provider_settings SET enabled = false;
+
+UPDATE ai_provider_settings
+SET enabled = true,
+    api_key = 'your-openai-key',
+    model = 'gpt-5-mini',
+    priority = 10,
+    updated_at = now()
+WHERE provider = 'openai';
+```
+
+If an enabled database row has a null API key, the service falls back to that provider's environment key. To configure the environment fallback instead, copy `.env.example` to `.env` and set one of these combinations:
 
 ```dotenv
 MODELS_DEFAULT_PROVIDER=gemini
 GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-3.5-flash
-SANITIZE_ENABLED=true
-RESOLUTION_SETTINGS_CACHE_TTL_SECONDS=300
+
+# Or OpenAI
+MODELS_DEFAULT_PROVIDER=openai
+OPENAI_API_KEY=your-key
+OPENAI_MODEL=gpt-5-mini
+
+# Or DeepSeek
+MODELS_DEFAULT_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your-key
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
-Rebuild the API after changing the environment:
+Provider settings are cached for `PROVIDER_CONFIG_CACHE_TTL_SECONDS`, which defaults to five minutes. If every provider in the cached chain fails, the service immediately reloads the database configuration and tries only providers whose provider, model, base URL, or API key changed. An unchanged failing configuration is not called twice for the same resolution request.
+
+In production, the `mock` provider is never considered usable. If no real provider is configured, or every configured provider fails to return a valid response, the resolution endpoint returns HTTP 502 with status `FAILED`. Development and test environments may still use `mock`.
+
+Gemini uses Google Search grounding. OpenAI uses the Responses API with structured output and hosted web search. DeepSeek uses its OpenAI-compatible Chat Completions API with JSON output, but this adapter does not have hosted web search and reports zero search queries.
+
+Rebuild the API after changing environment configuration:
 
 ```bash
 docker compose up -d --build
 ```
 
-The caller may supply an international calling code, such as `84` for Vietnam, which selects the country-specific prompt and confidence threshold. The Gemini provider uses Google Search grounding to resolve the postal code. A phone country code or landline area code may be used as a weak clue, but it is not treated as proof of a street-level location.
+The caller may supply an international calling code, such as `84` for Vietnam, which selects the country-specific prompt and confidence threshold. A phone country code or landline area code may be used as a weak clue, but it is not treated as proof of a street-level location.
 
-The provider uses minimal thinking, limits output size, and asks the model to use the minimum number of searches needed. Google Search grounding may incur Gemini API charges.
+Hosted search and model requests may incur provider charges.
 
 ### Model-result cache
 
@@ -94,7 +149,7 @@ Interactive Swagger documentation is available while the service is running:
 - Swagger UI: `http://localhost:3000/docs`
 - OpenAPI JSON: `http://localhost:3000/openapi.json`
 
-If `API_HOST_PORT` is changed, replace `3000` with that host port. Use Swagger UI's **Authorize** button to provide the `x-api-key` value required by the audit-log and statistics endpoints.
+If `NGINX_HOST_PORT` is changed, replace `3000` with that host port. Use Swagger UI's **Authorize** button to provide the `x-api-key` value required by the audit-log, statistics, and configuration-reload endpoints.
 
 ### Resolve an address
 
@@ -196,7 +251,7 @@ SET input_price_per_million_usd = 1.5,
 WHERE provider = 'gemini' AND model = 'DEFAULT';
 ```
 
-Pricing lookup prefers an exact provider/model row, then the provider's `DEFAULT` model row, and finally `DEFAULT`/`DEFAULT`. Rows are cached in each API process for `MODEL_PRICING_CACHE_TTL_SECONDS`, which defaults to one hour. Update the row whenever the model, service tier, or pricing changes; the new values take effect after the cache expires or the API restarts.
+Pricing lookup prefers an exact provider/model row, then the provider's `DEFAULT` model row, and finally `DEFAULT`/`DEFAULT`. Migration `006_model_pricing_settings.sql` includes exact rows for the configured `gpt-5-mini` and `deepseek-chat` defaults. The global fallback remains zero for unknown provider/model combinations. Rows are cached in each API process for `MODEL_PRICING_CACHE_TTL_SECONDS`, which defaults to one hour. Update the row whenever the model, service tier, or pricing changes; the new values take effect after the cache expires, the API restarts, or `POST /v1/config/reload` is called.
 
 ### Resolution statistics
 
@@ -242,6 +297,30 @@ Query parameters:
 
 The time filters are applied first, followed by descending date order and the sample limit.
 
+### Reload runtime configuration
+
+`POST /v1/config/reload`
+
+This protected endpoint immediately reloads the provider chain from PostgreSQL and clears the cached country prompt/threshold and model-pricing settings. It does not make an AI request and does not return API keys. It uses the same `x-api-key` authentication as the audit endpoints.
+
+```bash
+curl -X POST http://localhost:3000/v1/config/reload \
+  -H 'x-api-key: your-strong-logs-key'
+```
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "reloaded_at": "2026-09-08T12:00:00.000Z",
+  "providers": [
+    { "provider": "gemini", "model": "gemini-3.5-flash", "source": "database" },
+    { "provider": "openai", "model": "gpt-5-mini", "source": "database" }
+  ]
+}
+```
+
 ## Project structure
 
 - `src/app.ts`: Express application setup and route wiring.
@@ -252,13 +331,15 @@ The time filters are applied first, followed by descending date order and the sa
 - `src/lib/address.ts`: country-neutral address normalization and simple five-digit postcode detection.
 - `src/lib/prompt.ts`: the default Gemini prompt and template rendering.
 - `src/middleware/`: log endpoint authentication and centralized request error handling.
-- `src/providers/`: the provider interface plus Gemini and deterministic mock implementations.
-- `src/services/resolution-service.ts`: resolution orchestration, caching, confidence status, usage accounting, and audit logging.
+- `nginx/default.conf.template`: reverse proxy, rate limits, connection limits, and upstream timeouts.
+- `src/providers/`: provider adapters and the cached priority-ordered provider selector.
+- `src/services/resolution-service.ts`: provider-chain orchestration, caching, confidence status, usage accounting, and audit logging.
 - `migrations/`: ordered PostgreSQL schema migrations.
 - `malaysia_postcode_references`: development reference table containing only a small seed dataset, not the complete Pos Malaysia database.
 - `resolution_logs`: resolution audit records, provider usage, estimated cost, and error details.
 - `country_resolution_settings`: per-country prompt templates and confidence thresholds, including the default fallback.
 - `model_pricing_settings`: model token and search prices used for persisted cost estimates.
+- `ai_provider_settings`: enabled provider, model, base URL, priority, and optional API credentials.
 
 ## Local development
 
@@ -283,14 +364,15 @@ Before production use:
 - Import properly licensed postal-reference data where local validation is required.
 - Add rate limiting and authentication to the public resolution endpoint.
 - Define retention, encryption, or tokenization policies for addresses and phone numbers under applicable privacy laws.
-- Keep `LOGS_API_KEY` secret and restrict access to audit endpoints.
+- Keep `LOGS_API_KEY` secret and restrict access to audit and configuration-reload endpoints.
+- Encrypt provider API keys at the application or database layer and tightly restrict access to `ai_provider_settings`; the provided schema stores keys as plain text.
 - Review model and Google Search pricing configuration regularly.
 - Add metrics, tracing, evaluation datasets, a human-review workflow, and CI/CD deployment.
 
-Gemini uses the current `@google/genai` SDK. If the provider returns `FAILED`, inspect the API logs:
+Gemini uses `@google/genai`; OpenAI and DeepSeek use the official `openai` JavaScript client. If a provider returns `FAILED`, inspect the API logs:
 
 ```bash
 docker compose logs api --tail=100
 ```
 
-Provider errors do not intentionally log the Gemini API key, address, phone number, or rendered prompt.
+Provider errors do not intentionally log API keys, addresses, phone numbers, or rendered prompts.

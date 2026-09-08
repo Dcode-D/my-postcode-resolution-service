@@ -7,6 +7,7 @@ import type { AppConfig } from './config.js';
 import type { Database } from './db/database.js';
 import {
   createHealthHandler,
+  createReloadConfigHandler,
   createResolutionLogsHandler,
   createResolutionStatsHandler,
   createResolvePostcodeHandler,
@@ -48,6 +49,7 @@ export function createApp(
   app.post('/v1/postcode/resolve', createResolvePostcodeHandler(resolutionService));
   app.get('/v1/resolution-logs', requireLogAccess, createResolutionLogsHandler(database));
   app.get('/v1/resolution-stats', requireLogAccess, createResolutionStatsHandler(database));
+  app.post('/v1/config/reload', requireLogAccess, createReloadConfigHandler(resolutionService));
   app.use(requestErrorHandler);
   return app;
 }

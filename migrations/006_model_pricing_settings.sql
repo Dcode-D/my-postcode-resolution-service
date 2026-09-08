@@ -23,5 +23,7 @@ INSERT INTO model_pricing_settings (
 )
 VALUES
   ('DEFAULT', 'DEFAULT', 0, 0, 0, 0),
-  ('gemini', 'DEFAULT', 1.5, 0.15, 9, 14)
+  ('gemini', 'DEFAULT', 1.5, 0.15, 9, 14),
+  ('openai', 'gpt-5-mini', 0.25, 0.025, 2, 10),
+  ('deepseek', 'deepseek-chat', 0.27, 0.07, 1.10, 0)
 ON CONFLICT (provider, model) DO NOTHING;

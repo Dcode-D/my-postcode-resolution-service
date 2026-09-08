@@ -4,13 +4,16 @@ export const openApiDocument = {
     title: 'Postcode Resolution Service API',
     version: '1.0.0',
     description:
-      'Resolves postal addresses and exposes authenticated audit-log and resolution-statistics endpoints.',
+      'Resolves postal addresses and exposes authenticated audit-log, statistics, and runtime configuration endpoints.',
   },
   servers: [{ url: '/', description: 'Current server' }],
   tags: [
     { name: 'System', description: 'Service health' },
     { name: 'Resolution', description: 'Postal-code resolution' },
-    { name: 'Operations', description: 'Authenticated audit and statistics endpoints' },
+    {
+      name: 'Operations',
+      description: 'Authenticated audit, statistics, and runtime configuration endpoints',
+    },
   ],
   paths: {
     '/health': {
@@ -38,7 +41,7 @@ export const openApiDocument = {
         tags: ['Resolution'],
         summary: 'Resolve a postal code',
         description:
-          'Resolves the most likely postal code and country for an address. resource_id is used only for audit correlation, while country_code selects prompt settings.',
+          'Resolves the most likely postal code and country for an address. Configured providers are attempted in priority order until one returns a valid response. resource_id is used only for audit correlation, while country_code selects prompt settings.',
         operationId: 'resolvePostcode',
         requestBody: {
           required: true,
@@ -66,8 +69,27 @@ export const openApiDocument = {
             },
           },
           '400': { $ref: '#/components/responses/InvalidRequest' },
+          '429': {
+            description: 'Nginx rejected the request because a rate or connection limit was reached.',
+            headers: {
+              'Retry-After': {
+                description: 'Suggested number of seconds before retrying.',
+                schema: { type: 'integer', minimum: 1 },
+              },
+            },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                example: {
+                  status: 'FAILED',
+                  error: 'Too many concurrent or frequent requests',
+                },
+              },
+            },
+          },
           '502': {
-            description: 'The resolution provider or audit persistence operation failed.',
+            description:
+              'No usable provider was configured, every provider failed to return a valid response, or audit persistence failed.',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ResolutionResponse' },
@@ -137,6 +159,36 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/config/reload': {
+      post: {
+        tags: ['Operations'],
+        summary: 'Reload runtime configuration',
+        description:
+          'Immediately clears the country-settings and model-pricing caches and reloads the ordered provider chain from PostgreSQL. It does not call an AI provider.',
+        operationId: 'reloadConfiguration',
+        security: [{ ApiKeyAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Configuration was reloaded successfully. API keys are never returned.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ReloadConfigurationResponse' },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '503': {
+            description: 'Operations access or a usable AI provider is not configured.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -144,7 +196,7 @@ export const openApiDocument = {
         type: 'apiKey',
         in: 'header',
         name: 'x-api-key',
-        description: 'The value configured in LOGS_API_KEY.',
+        description: 'The value configured in LOGS_API_KEY for protected operations endpoints.',
       },
     },
     parameters: {
@@ -219,6 +271,27 @@ export const openApiDocument = {
         type: 'object',
         required: ['status'],
         properties: { status: { type: 'string', enum: ['ok'] } },
+      },
+      ReloadedProvider: {
+        type: 'object',
+        required: ['provider', 'model', 'source'],
+        properties: {
+          provider: { type: 'string', enum: ['gemini', 'openai', 'deepseek', 'mock'] },
+          model: { type: 'string' },
+          source: { type: 'string', enum: ['database', 'environment'] },
+        },
+      },
+      ReloadConfigurationResponse: {
+        type: 'object',
+        required: ['status', 'reloaded_at', 'providers'],
+        properties: {
+          status: { type: 'string', enum: ['ok'] },
+          reloaded_at: { type: 'string', format: 'date-time' },
+          providers: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ReloadedProvider' },
+          },
+        },
       },
       ErrorResponse: {
         type: 'object',

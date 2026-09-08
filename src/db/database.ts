@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import type { AppConfig } from '../config.js';
 import type {
+  AiProviderName,
+  AiProviderSettings,
   CountryResolutionSettings,
   ModelPricingSettings,
   PostcodeReference,
@@ -106,6 +108,26 @@ export class Database {
           searchPricePerThousandUsd: Number(row.searchPricePerThousandUsd),
         }
       : null;
+  }
+
+  async listEnabledProviderSettings(): Promise<AiProviderSettings[]> {
+    const result = await this.pool.query<{
+      provider: AiProviderName;
+      apiKey: string | null;
+      model: string;
+      baseUrl: string | null;
+      priority: number;
+    }>(
+      `SELECT provider,
+              api_key AS "apiKey",
+              model,
+              base_url AS "baseUrl",
+              priority
+       FROM ai_provider_settings
+       WHERE enabled = true
+       ORDER BY priority ASC, updated_at DESC, provider ASC`,
+    );
+    return result.rows;
   }
 
   async writeResolutionLog(input: {

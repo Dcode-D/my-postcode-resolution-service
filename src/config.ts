@@ -9,15 +9,26 @@ const optionalSecretFromEnv = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().min(16).optional(),
 );
+const optionalUrlFromEnv = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().url().optional(),
+);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().min(1),
   SANITIZE_ENABLED: boolFromEnv,
-  MODELS_DEFAULT_PROVIDER: z.enum(['gemini', 'mock']).default('mock'),
+  MODELS_DEFAULT_PROVIDER: z.enum(['gemini', 'openai', 'deepseek', 'mock']).default('mock'),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-3.5-flash'),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default('gpt-5-mini'),
+  OPENAI_BASE_URL: optionalUrlFromEnv,
+  DEEPSEEK_API_KEY: z.string().optional(),
+  DEEPSEEK_MODEL: z.string().default('deepseek-chat'),
+  DEEPSEEK_BASE_URL: z.string().url().default('https://api.deepseek.com'),
+  PROVIDER_CONFIG_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
   RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
   MODEL_PRICING_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
   MODEL_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(604800).default(86400),
@@ -31,9 +42,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const result = envSchema.safeParse(env);
   if (!result.success) {
     throw new Error(`Invalid environment configuration: ${result.error.message}`);
-  }
-  if (result.data.MODELS_DEFAULT_PROVIDER === 'gemini' && !result.data.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is required when MODELS_DEFAULT_PROVIDER=gemini');
   }
   return result.data;
 }

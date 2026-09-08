@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelProvider } from '../src/providers/model-provider.js';
+import type { ModelProviderSelector } from '../src/providers/provider-selector.js';
 import { ResolutionService, type ResolutionStore } from '../src/services/resolution-service.js';
 
 const logs: Array<Parameters<ResolutionStore['writeResolutionLog']>[0]> = [];
@@ -42,6 +43,15 @@ const provider: ModelProvider = {
     usage: testUsage,
   }),
 };
+const selectProvider = (selectedProvider: ModelProvider): ModelProviderSelector => ({
+  getProviders: async () => [
+    {
+      provider: selectedProvider,
+      fingerprint: `${selectedProvider.name}/${selectedProvider.model}`,
+      source: 'environment',
+    },
+  ],
+});
 const store: ResolutionStore = {
   getModelPricing: async () => pricing,
   getResolutionSettings: async (countryCode) => ({
@@ -70,7 +80,7 @@ const store: ResolutionStore = {
 
 describe('ResolutionService', () => {
   it('accepts a high-confidence model result and audits local verification', async () => {
-    const service = new ResolutionService(store, provider, {
+    const service = new ResolutionService(store, selectProvider(provider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
       MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
@@ -123,7 +133,7 @@ describe('ResolutionService', () => {
         usage: testUsage,
       }),
     };
-    const service = new ResolutionService(store, internationalProvider, {
+    const service = new ResolutionService(store, selectProvider(internationalProvider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
       MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
@@ -154,7 +164,7 @@ describe('ResolutionService', () => {
         return provider.resolve(context);
       },
     };
-    const service = new ResolutionService(store, countingProvider, {
+    const service = new ResolutionService(store, selectProvider(countingProvider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
       MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
@@ -184,5 +194,65 @@ describe('ResolutionService', () => {
       search_queries: 0,
       estimated_list_cost_usd: 0,
     });
+  });
+
+  it('falls through provider errors but stops on a valid low-confidence response', async () => {
+    let secondCalls = 0;
+    let thirdCalls = 0;
+    const failingProvider: ModelProvider = {
+      name: 'first',
+      model: 'first-v1',
+      resolve: async () => {
+        throw new Error('provider unavailable');
+      },
+    };
+    const ambiguousProvider: ModelProvider = {
+      name: 'second',
+      model: 'second-v1',
+      resolve: async (context) => {
+        secondCalls += 1;
+        const result = await provider.resolve(context);
+        return {
+          ...result,
+          decision: { ...result.decision, confidence_score: 0.4 },
+        };
+      },
+    };
+    const unusedProvider: ModelProvider = {
+      ...provider,
+      name: 'third',
+      model: 'third-v1',
+      resolve: async (context) => {
+        thirdCalls += 1;
+        return provider.resolve(context);
+      },
+    };
+    const selector: ModelProviderSelector = {
+      getProviders: async () =>
+        [failingProvider, ambiguousProvider, unusedProvider].map((selectedProvider) => ({
+          provider: selectedProvider,
+          fingerprint: `${selectedProvider.name}/${selectedProvider.model}`,
+          source: 'database' as const,
+        })),
+    };
+    const service = new ResolutionService(store, selector, {
+      SANITIZE_ENABLED: true,
+      RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
+      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
+      MODEL_CACHE_TTL_SECONDS: 86400,
+      MODEL_CACHE_MAX_ENTRIES: 1000,
+    });
+
+    const result = await service.resolve({
+      country_code: '60',
+      address: '16 No, 16 Lebuh Tenggiri 2 Seberang Jaya',
+      phone: '0176710714',
+      debug: true,
+    });
+
+    expect(result.status).toBe('AMBIGUOUS');
+    expect(result.debug_info?.provider).toBe('second');
+    expect(secondCalls).toBe(1);
+    expect(thirdCalls).toBe(0);
   });
 });

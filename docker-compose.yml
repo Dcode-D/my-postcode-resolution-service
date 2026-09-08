@@ -25,16 +25,39 @@ services:
       MODELS_DEFAULT_PROVIDER: ${MODELS_DEFAULT_PROVIDER:-mock}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      PROVIDER_CONFIG_CACHE_TTL_SECONDS: ${PROVIDER_CONFIG_CACHE_TTL_SECONDS:-300}
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: ${RESOLUTION_SETTINGS_CACHE_TTL_SECONDS:-300}
       MODEL_CACHE_TTL_SECONDS: ${MODEL_CACHE_TTL_SECONDS:-86400}
       MODEL_CACHE_MAX_ENTRIES: ${MODEL_CACHE_MAX_ENTRIES:-1000}
       MODEL_PRICING_CACHE_TTL_SECONDS: ${MODEL_PRICING_CACHE_TTL_SECONDS:-3600}
       LOGS_API_KEY: ${LOGS_API_KEY:-}
-    ports:
-      - '${API_HOST_PORT:-3000}:${PORT:-3000}'
+    expose:
+      - '${PORT:-3000}'
     depends_on:
       postgres:
         condition: service_healthy
+
+  nginx:
+    image: nginx:stable-alpine
+    environment:
+      API_UPSTREAM_PORT: ${PORT:-3000}
+      NGINX_RESOLVE_RATE: ${NGINX_RESOLVE_RATE:-5r/s}
+      NGINX_RESOLVE_BURST: ${NGINX_RESOLVE_BURST:-10}
+      NGINX_RESOLVE_CONNECTIONS_PER_IP: ${NGINX_RESOLVE_CONNECTIONS_PER_IP:-5}
+      NGINX_RESOLVE_CONNECTIONS_TOTAL: ${NGINX_RESOLVE_CONNECTIONS_TOTAL:-50}
+      NGINX_PROXY_TIMEOUT: ${NGINX_PROXY_TIMEOUT:-120s}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - '${NGINX_BIND_ADDRESS:-0.0.0.0}:${NGINX_HOST_PORT:-${API_HOST_PORT:-3000}}:80'
+    depends_on:
+      - api
 
 volumes:
   postgres_data:
