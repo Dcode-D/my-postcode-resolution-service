@@ -120,6 +120,8 @@ The default cache lifetime is 24 hours with a maximum of 1,000 entries. Set `MOD
 
 Prompts and minimum success thresholds are stored in `country_resolution_settings`. Migration `004_country_resolution_settings.sql` preserves the existing working prompt in the `DEFAULT` row. A request with a calling code first looks for that code and falls back to the unchanged default when no matching row exists. Requests without a calling code use `DEFAULT` directly.
 
+Migration `008_malaysia_resolution_settings.sql` adds a Malaysia-specific configuration for calling code `60`. It guides the model to validate Malaysian five-digit postcodes against the street, locality, and state while keeping the confidence threshold at `0.800`.
+
 The supported prompt placeholders are:
 
 - `{{address}}`
