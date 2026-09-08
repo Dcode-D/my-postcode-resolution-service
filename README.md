@@ -212,11 +212,13 @@ The time filters are applied first, followed by descending date order and the sa
 
 ## Project structure
 
-- `src/app.ts`: Express routes, middleware, authentication, and error handling.
+- `src/app.ts`: Express application setup and route wiring.
 - `src/config.ts`: environment parsing and validation.
 - `src/db/database.ts`: PostgreSQL queries and audit persistence.
+- `src/handlers/`: one request handler per API endpoint.
 - `src/lib/address.ts`: country-neutral address normalization and simple five-digit postcode detection.
 - `src/lib/prompt.ts`: the default Gemini prompt and template rendering.
+- `src/middleware/`: log endpoint authentication and centralized request error handling.
 - `src/providers/`: the provider interface plus Gemini and deterministic mock implementations.
 - `src/services/resolution-service.ts`: resolution orchestration, caching, confidence status, usage accounting, and audit logging.
 - `migrations/`: ordered PostgreSQL schema migrations.
