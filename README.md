@@ -71,6 +71,13 @@ Set `MODEL_PROMPT_TEMPLATE` to replace the built-in prompt. The supported placeh
 
 ## API
 
+Interactive Swagger documentation is available while the service is running:
+
+- Swagger UI: `http://localhost:3000/docs`
+- OpenAPI JSON: `http://localhost:3000/openapi.json`
+
+If `API_HOST_PORT` is changed, replace `3000` with that host port. Use Swagger UI's **Authorize** button to provide the `x-api-key` value required by the audit-log and statistics endpoints.
+
 ### Resolve an address
 
 `POST /v1/postcode/resolve`
@@ -215,6 +222,7 @@ The time filters are applied first, followed by descending date order and the sa
 - `src/app.ts`: Express application setup and route wiring.
 - `src/config.ts`: environment parsing and validation.
 - `src/db/database.ts`: PostgreSQL queries and audit persistence.
+- `src/docs/openapi.ts`: OpenAPI specification used by Swagger UI.
 - `src/handlers/`: one request handler per API endpoint.
 - `src/lib/address.ts`: country-neutral address normalization and simple five-digit postcode detection.
 - `src/lib/prompt.ts`: the default Gemini prompt and template rendering.

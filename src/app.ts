@@ -10,6 +10,8 @@ import {
   createResolutionLogsHandler,
   createResolutionStatsHandler,
   createResolvePostcodeHandler,
+  openApiDocumentHandler,
+  swaggerUiHandler,
 } from './handlers/index.js';
 import { createLogAccessMiddleware } from './middleware/log-access.js';
 import { requestErrorHandler } from './middleware/request-error-handler.js';
@@ -40,6 +42,8 @@ export function createApp(
   );
 
   const requireLogAccess = createLogAccessMiddleware(config.LOGS_API_KEY);
+  app.get('/docs', swaggerUiHandler);
+  app.get('/openapi.json', openApiDocumentHandler);
   app.get('/health', createHealthHandler(database));
   app.post('/v1/postcode/resolve', createResolvePostcodeHandler(resolutionService));
   app.get('/v1/resolution-logs', requireLogAccess, createResolutionLogsHandler(database));
