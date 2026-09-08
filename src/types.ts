@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 export const resolutionRequestSchema = z.object({
-  resource_id: z.string().trim().min(1).max(128),
+  resource_id: z.string().trim().min(1).max(128).optional(),
+  country_code: z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d{0,2}$/)
+    .optional(),
   address: z.string().trim().min(5).max(500),
   phone: z.string().trim().min(6).max(30),
   debug: z.boolean().optional().default(false),
@@ -103,6 +108,21 @@ export interface ResolutionStats {
   lastLogAt: Date | null;
 }
 
+export interface CountryResolutionSettings {
+  countryCode: string;
+  promptTemplate: string;
+  confidenceThreshold: number;
+}
+
+export interface ModelPricingSettings {
+  provider: string;
+  model: string;
+  inputPricePerMillionUsd: number;
+  cachedInputPricePerMillionUsd: number;
+  outputPricePerMillionUsd: number;
+  searchPricePerThousandUsd: number;
+}
+
 export interface ResolutionResponse {
   status: ResolutionStatus;
   confidence_score: number;
@@ -120,6 +140,9 @@ export interface PostcodeReference {
 export interface ResolutionLog {
   id: string;
   resourceId: string | null;
+  requestCountryCode: string | null;
+  settingsCountryCode: string | null;
+  confidenceThreshold: string | number | null;
   requestAddress: string;
   requestPhone: string;
   sanitizedAddress: string;

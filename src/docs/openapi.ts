@@ -38,7 +38,7 @@ export const openApiDocument = {
         tags: ['Resolution'],
         summary: 'Resolve a postal code',
         description:
-          'Resolves the most likely postal code and country for an address. The resource_id is recorded only for audit correlation and is not sent to the model.',
+          'Resolves the most likely postal code and country for an address. resource_id is used only for audit correlation, while country_code selects prompt settings.',
         operationId: 'resolvePostcode',
         requestBody: {
           required: true,
@@ -47,6 +47,7 @@ export const openApiDocument = {
               schema: { $ref: '#/components/schemas/ResolutionRequest' },
               example: {
                 resource_id: 'shipment-123',
+                country_code: '60',
                 address: '16 Lebuh Tenggiri 2, Seberang Jaya',
                 phone: '0176710714',
                 debug: false,
@@ -231,13 +232,20 @@ export const openApiDocument = {
       ResolutionRequest: {
         type: 'object',
         additionalProperties: false,
-        required: ['resource_id', 'address', 'phone'],
+        required: ['address', 'phone'],
         properties: {
           resource_id: {
             type: 'string',
             minLength: 1,
             maxLength: 128,
-            description: 'Caller identifier stored only in the audit log.',
+            description: 'Optional caller identifier stored only in the audit log.',
+          },
+          country_code: {
+            type: 'string',
+            pattern: '^[1-9]\\d{0,2}$',
+            description:
+              'Optional international calling code without the plus sign. It selects country-specific settings; for example, use 84 for Vietnam.',
+            example: '84',
           },
           address: { type: 'string', minLength: 5, maxLength: 500 },
           phone: {
@@ -334,6 +342,24 @@ export const openApiDocument = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           resourceId: { type: 'string', nullable: true },
+          requestCountryCode: {
+            type: 'string',
+            pattern: '^[1-9]\\d{0,2}$',
+            nullable: true,
+            description: 'The optional international calling code supplied with the request.',
+          },
+          settingsCountryCode: {
+            type: 'string',
+            nullable: true,
+            description: 'The matched ISO country code, or DEFAULT when fallback settings were used.',
+          },
+          confidenceThreshold: {
+            nullable: true,
+            oneOf: [
+              { type: 'number', minimum: 0, maximum: 1 },
+              { type: 'string', pattern: '^(0(?:\\.\\d+)?|1(?:\\.0+)?)$' },
+            ],
+          },
           requestAddress: { type: 'string' },
           requestPhone: { type: 'string' },
           sanitizedAddress: { type: 'string' },

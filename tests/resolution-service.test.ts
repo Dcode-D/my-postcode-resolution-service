@@ -13,10 +13,12 @@ const testUsage = {
   search_queries: 1,
 };
 const pricing = {
-  GEMINI_INPUT_PRICE_PER_MILLION_USD: 1.5,
-  GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD: 0.15,
-  GEMINI_OUTPUT_PRICE_PER_MILLION_USD: 9,
-  GEMINI_SEARCH_PRICE_PER_THOUSAND_USD: 14,
+  provider: 'test',
+  model: 'DEFAULT',
+  inputPricePerMillionUsd: 1.5,
+  cachedInputPricePerMillionUsd: 0.15,
+  outputPricePerMillionUsd: 9,
+  searchPricePerThousandUsd: 14,
 };
 const provider: ModelProvider = {
   name: 'test',
@@ -41,6 +43,13 @@ const provider: ModelProvider = {
   }),
 };
 const store: ResolutionStore = {
+  getModelPricing: async () => pricing,
+  getResolutionSettings: async (countryCode) => ({
+    countryCode: countryCode === '60' ? '60' : 'DEFAULT',
+    promptTemplate:
+      'Country: {{country_code}} Address: {{address}} Phone: {{phone}} Hints: {{detected_rules}}',
+    confidenceThreshold: 0.8,
+  }),
   findPostcode: async (postcode) =>
     postcode === '13700'
       ? {
@@ -63,14 +72,14 @@ describe('ResolutionService', () => {
   it('accepts a high-confidence model result and audits local verification', async () => {
     const service = new ResolutionService(store, provider, {
       SANITIZE_ENABLED: true,
-      CONFIDENCE_THRESHOLD: 0.8,
-      MODEL_PROMPT_TEMPLATE: undefined,
+      RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
+      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
-      ...pricing,
     });
     const result = await service.resolve({
       resource_id: 'shipment-my-001',
+      country_code: '60',
       address: '16 No, 16 Lebuh Tenggiri 2 Seberang Jaya',
       phone: '0176710714',
       debug: true,
@@ -116,15 +125,15 @@ describe('ResolutionService', () => {
     };
     const service = new ResolutionService(store, internationalProvider, {
       SANITIZE_ENABLED: true,
-      CONFIDENCE_THRESHOLD: 0.8,
-      MODEL_PROMPT_TEMPLATE: undefined,
+      RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
+      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
-      ...pricing,
     });
 
     const result = await service.resolve({
       resource_id: 'shipment-gb-001',
+      country_code: '44',
       address: '10 Downing Street, London',
       phone: '+44 20 7925 0918',
       debug: true,
@@ -147,14 +156,14 @@ describe('ResolutionService', () => {
     };
     const service = new ResolutionService(store, countingProvider, {
       SANITIZE_ENABLED: true,
-      CONFIDENCE_THRESHOLD: 0.8,
-      MODEL_PROMPT_TEMPLATE: undefined,
+      RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
+      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
-      ...pricing,
     });
     const request = {
       resource_id: 'shipment-cache-001',
+      country_code: '60',
       address: '16 No, 16 Lebuh Tenggiri 2 Seberang Jaya',
       phone: '0176710714',
       debug: true,

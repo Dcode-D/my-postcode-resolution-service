@@ -4,6 +4,7 @@ import type { PreprocessedAddress } from '../lib/address.js';
 export interface ResolutionContext {
   address: PreprocessedAddress;
   phone: string;
+  countryCode?: string;
   prompt: string;
 }
 

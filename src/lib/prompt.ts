@@ -16,14 +16,16 @@ export function renderPrompt(
   template: string,
   address: PreprocessedAddress,
   phone: string,
+  countryCode?: string,
 ): string {
   const values: Record<string, string> = {
     address: address.value,
     phone,
+    country_code: countryCode ?? '',
     detected_rules: address.rules.join(', '),
   };
   return template.replace(
-    /{{(address|phone|detected_rules)}}/g,
+    /{{(address|phone|country_code|detected_rules)}}/g,
     (_, key: string) => values[key] ?? '',
   );
 }

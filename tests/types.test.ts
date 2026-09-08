@@ -2,24 +2,36 @@ import { describe, expect, it } from 'vitest';
 import { resolvedAddressSchema, resolutionRequestSchema } from '../src/types.js';
 
 describe('country-aware API schemas', () => {
-  it('does not require the caller to know the country', () => {
+  it('accepts an optional international calling code', () => {
     expect(
       resolutionRequestSchema.parse({
         resource_id: 'shipment-123',
+        country_code: '84',
         address: 'Sample address',
         phone: '123456',
       }),
     ).toEqual({
       resource_id: 'shipment-123',
+      country_code: '84',
       address: 'Sample address',
       phone: '123456',
       debug: false,
     });
   });
 
-  it('requires a resource id for audit logging', () => {
-    expect(() =>
+  it('allows resource id and country code to be omitted', () => {
+    expect(
       resolutionRequestSchema.parse({ address: 'Sample address', phone: '123456' }),
+    ).toEqual({ address: 'Sample address', phone: '123456', debug: false });
+  });
+
+  it('rejects a calling code that contains a plus sign', () => {
+    expect(() =>
+      resolutionRequestSchema.parse({
+        country_code: '+84',
+        address: 'Sample address',
+        phone: '123456',
+      }),
     ).toThrow();
   });
 

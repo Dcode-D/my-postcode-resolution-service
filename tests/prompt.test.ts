@@ -8,6 +8,7 @@ describe('default Gemini prompt', () => {
       DEFAULT_PROMPT,
       preprocessAddress('Jln Test, 42200 Kapar', true),
       '0176710714',
+      '60',
     );
 
     expect(rendered).toContain('minimum number of Google searches');
@@ -19,11 +20,22 @@ describe('default Gemini prompt', () => {
     expect(rendered).not.toContain('{{phone}}');
   });
 
-  it('does not require a country from the caller', () => {
+  it('keeps the original country-inference wording in the default prompt', () => {
     const address = preprocessAddress('10 Downing Street, London', true);
-    const rendered = renderPrompt(DEFAULT_PROMPT, address, '+44 20 7925 0918');
+    const rendered = renderPrompt(DEFAULT_PROMPT, address, '+44 20 7925 0918', '44');
 
     expect(rendered).toContain('country for this address');
     expect(rendered).toContain('10 Downing Street, London');
+  });
+
+  it('renders country_code for country-specific templates', () => {
+    const rendered = renderPrompt(
+      'Resolve {{address}} in {{country_code}}',
+      preprocessAddress('Example road', true),
+      '123456',
+      '44',
+    );
+
+    expect(rendered).toBe('Resolve Example road in 44');
   });
 });

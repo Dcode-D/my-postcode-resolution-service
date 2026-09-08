@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import type { AppConfig } from '../config.js';
 import type {
+  CountryResolutionSettings,
+  ModelPricingSettings,
   PostcodeReference,
   ResolutionLog,
   ResolutionLogQuery,
@@ -41,9 +43,77 @@ export class Database {
     return result.rows[0] ?? null;
   }
 
+  async getResolutionSettings(countryCode: string): Promise<CountryResolutionSettings | null> {
+    const result = await this.pool.query<{
+      countryCode: string;
+      promptTemplate: string;
+      confidenceThreshold: string | number;
+    }>(
+      `SELECT country_code AS "countryCode",
+              prompt_template AS "promptTemplate",
+              confidence_threshold AS "confidenceThreshold"
+       FROM country_resolution_settings
+       WHERE country_code IN ($1, 'DEFAULT')
+       ORDER BY (country_code = $1) DESC
+       LIMIT 1`,
+      [countryCode],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          countryCode: row.countryCode,
+          promptTemplate: row.promptTemplate,
+          confidenceThreshold: Number(row.confidenceThreshold),
+        }
+      : null;
+  }
+
+  async getModelPricing(provider: string, model: string): Promise<ModelPricingSettings | null> {
+    const result = await this.pool.query<{
+      provider: string;
+      model: string;
+      inputPricePerMillionUsd: string | number;
+      cachedInputPricePerMillionUsd: string | number;
+      outputPricePerMillionUsd: string | number;
+      searchPricePerThousandUsd: string | number;
+    }>(
+      `SELECT provider,
+              model,
+              input_price_per_million_usd AS "inputPricePerMillionUsd",
+              cached_input_price_per_million_usd AS "cachedInputPricePerMillionUsd",
+              output_price_per_million_usd AS "outputPricePerMillionUsd",
+              search_price_per_thousand_usd AS "searchPricePerThousandUsd"
+       FROM model_pricing_settings
+       WHERE (provider = $1 AND model = $2)
+          OR (provider = $1 AND model = 'DEFAULT')
+          OR (provider = 'DEFAULT' AND model = 'DEFAULT')
+       ORDER BY CASE
+         WHEN provider = $1 AND model = $2 THEN 1
+         WHEN provider = $1 AND model = 'DEFAULT' THEN 2
+         ELSE 3
+       END
+       LIMIT 1`,
+      [provider, model],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          provider: row.provider,
+          model: row.model,
+          inputPricePerMillionUsd: Number(row.inputPricePerMillionUsd),
+          cachedInputPricePerMillionUsd: Number(row.cachedInputPricePerMillionUsd),
+          outputPricePerMillionUsd: Number(row.outputPricePerMillionUsd),
+          searchPricePerThousandUsd: Number(row.searchPricePerThousandUsd),
+        }
+      : null;
+  }
+
   async writeResolutionLog(input: {
     id: string;
-    resourceId: string;
+    resourceId?: string;
+    requestCountryCode?: string;
+    settingsCountryCode?: string;
+    confidenceThreshold?: number;
     requestAddress: string;
     requestPhone: string;
     sanitizedAddress: string;
@@ -57,15 +127,19 @@ export class Database {
   }): Promise<void> {
     await this.pool.query(
       `INSERT INTO resolution_logs
-       (id, resource_id, request_address, request_phone, sanitized_address, sanitize_enabled, provider, model,
+       (id, resource_id, request_country_code, settings_country_code, confidence_threshold,
+        request_address, request_phone, sanitized_address, sanitize_enabled, provider, model,
         status, confidence_score, result, detected_rules, cache_hit, latency_ms, prompt_tokens,
         cached_prompt_tokens, output_tokens, thinking_tokens, tool_tokens, total_tokens,
         search_queries, estimated_list_cost_usd, error_code)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13,
-               $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb,
+               $15::jsonb, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
       [
         input.id,
-        input.resourceId,
+        input.resourceId ?? null,
+        input.requestCountryCode ?? null,
+        input.settingsCountryCode ?? null,
+        input.confidenceThreshold ?? null,
         input.requestAddress,
         input.requestPhone,
         input.sanitizedAddress,
@@ -107,6 +181,9 @@ export class Database {
     const result = await this.pool.query<ResolutionLog>(
       `SELECT id,
               resource_id AS "resourceId",
+              request_country_code AS "requestCountryCode",
+              settings_country_code AS "settingsCountryCode",
+              confidence_threshold AS "confidenceThreshold",
               request_address AS "requestAddress",
               request_phone AS "requestPhone",
               sanitized_address AS "sanitizedAddress",

@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
+import NodeCache from 'node-cache';
 import type { AppConfig } from '../config.js';
 import { preprocessAddress } from '../lib/address.js';
-import { DEFAULT_PROMPT, renderPrompt } from '../lib/prompt.js';
+import { renderPrompt } from '../lib/prompt.js';
 import type {
   ModelProvider,
   ModelProviderResult,
   ResolutionContext,
 } from '../providers/model-provider.js';
 import type {
+  CountryResolutionSettings,
   ModelDecision,
+  ModelPricingSettings,
   ModelUsage,
   PostcodeReference,
   ResolutionRequest,
@@ -36,9 +39,14 @@ function emptyModelUsage(): ModelUsage {
 export interface ResolutionStore {
   findPostcode(postcode: string): Promise<PostcodeReference | null>;
   findPostcodeByRegion(state: string, city: string): Promise<PostcodeReference | null>;
+  getResolutionSettings(countryCode: string): Promise<CountryResolutionSettings | null>;
+  getModelPricing(provider: string, model: string): Promise<ModelPricingSettings | null>;
   writeResolutionLog(input: {
     id: string;
-    resourceId: string;
+    resourceId?: string;
+    requestCountryCode?: string;
+    settingsCountryCode?: string;
+    confidenceThreshold?: number;
     requestAddress: string;
     requestPhone: string;
     sanitizedAddress: string;
@@ -55,6 +63,10 @@ export interface ResolutionStore {
 export class ResolutionService {
   private readonly decisionCache = new Map<string, CachedDecision>();
   private readonly inFlightDecisions = new Map<string, Promise<ModelProviderResult>>();
+  private readonly resolutionSettingsCache: NodeCache;
+  private readonly inFlightSettings = new Map<string, Promise<CountryResolutionSettings>>();
+  private readonly modelPricingCache: NodeCache;
+  private readonly inFlightPricing = new Map<string, Promise<ModelPricingSettings>>();
 
   constructor(
     private readonly database: ResolutionStore,
@@ -62,26 +74,83 @@ export class ResolutionService {
     private readonly config: Pick<
       AppConfig,
       | 'SANITIZE_ENABLED'
-      | 'CONFIDENCE_THRESHOLD'
-      | 'MODEL_PROMPT_TEMPLATE'
+      | 'RESOLUTION_SETTINGS_CACHE_TTL_SECONDS'
+      | 'MODEL_PRICING_CACHE_TTL_SECONDS'
       | 'MODEL_CACHE_TTL_SECONDS'
       | 'MODEL_CACHE_MAX_ENTRIES'
-      | 'GEMINI_INPUT_PRICE_PER_MILLION_USD'
-      | 'GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD'
-      | 'GEMINI_OUTPUT_PRICE_PER_MILLION_USD'
-      | 'GEMINI_SEARCH_PRICE_PER_THOUSAND_USD'
     >,
-  ) {}
+  ) {
+    this.resolutionSettingsCache = new NodeCache({
+      stdTTL: config.RESOLUTION_SETTINGS_CACHE_TTL_SECONDS,
+      checkperiod: Math.min(config.RESOLUTION_SETTINGS_CACHE_TTL_SECONDS, 120),
+      useClones: false,
+    });
+    this.modelPricingCache = new NodeCache({
+      stdTTL: config.MODEL_PRICING_CACHE_TTL_SECONDS,
+      checkperiod: Math.min(config.MODEL_PRICING_CACHE_TTL_SECONDS, 600),
+      useClones: false,
+    });
+  }
 
-  private buildUsage(usage: ModelUsage, cacheHit: boolean, latencyMs: number): ResolutionUsage {
+  private async getResolutionSettings(countryCode: string): Promise<CountryResolutionSettings> {
+    const cached = this.resolutionSettingsCache.get<CountryResolutionSettings>(countryCode);
+    if (cached) return cached;
+
+    const inFlight = this.inFlightSettings.get(countryCode);
+    if (inFlight) return inFlight;
+
+    const request = this.database.getResolutionSettings(countryCode).then((settings) => {
+      if (!settings) {
+        throw new Error('No country resolution settings or DEFAULT fallback are configured');
+      }
+      this.resolutionSettingsCache.set(countryCode, settings);
+      return settings;
+    });
+    this.inFlightSettings.set(countryCode, request);
+    try {
+      return await request;
+    } finally {
+      this.inFlightSettings.delete(countryCode);
+    }
+  }
+
+  private async getModelPricing(): Promise<ModelPricingSettings> {
+    const key = `${this.provider.name}\0${this.provider.model}`;
+    const cached = this.modelPricingCache.get<ModelPricingSettings>(key);
+    if (cached) return cached;
+
+    const inFlight = this.inFlightPricing.get(key);
+    if (inFlight) return inFlight;
+
+    const request = this.database
+      .getModelPricing(this.provider.name, this.provider.model)
+      .then((pricing) => {
+        if (!pricing) throw new Error('No model pricing settings are configured');
+        this.modelPricingCache.set(key, pricing);
+        return pricing;
+      });
+    this.inFlightPricing.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.inFlightPricing.delete(key);
+    }
+  }
+
+  private buildUsage(
+    usage: ModelUsage,
+    cacheHit: boolean,
+    latencyMs: number,
+    pricing: ModelPricingSettings,
+  ): ResolutionUsage {
     const uncachedPromptTokens = Math.max(0, usage.prompt_tokens - usage.cached_prompt_tokens);
     const estimatedListCost =
-      (uncachedPromptTokens / 1_000_000) * this.config.GEMINI_INPUT_PRICE_PER_MILLION_USD +
+      (uncachedPromptTokens / 1_000_000) * pricing.inputPricePerMillionUsd +
       (usage.cached_prompt_tokens / 1_000_000) *
-        this.config.GEMINI_CACHED_INPUT_PRICE_PER_MILLION_USD +
+        pricing.cachedInputPricePerMillionUsd +
       ((usage.output_tokens + usage.thinking_tokens) / 1_000_000) *
-        this.config.GEMINI_OUTPUT_PRICE_PER_MILLION_USD +
-      (usage.search_queries / 1000) * this.config.GEMINI_SEARCH_PRICE_PER_THOUSAND_USD;
+        pricing.outputPricePerMillionUsd +
+      (usage.search_queries / 1000) * pricing.searchPricePerThousandUsd;
     return {
       provider: this.provider.name,
       model: this.provider.model,
@@ -95,8 +164,13 @@ export class ResolutionService {
 
   private async resolveWithCache(
     context: ResolutionContext,
+    confidenceThreshold: number,
   ): Promise<{ result: ModelProviderResult; cacheHit: boolean }> {
-    const key = createHash('sha256').update(context.prompt).digest('hex');
+    const key = createHash('sha256')
+      .update(context.countryCode ?? 'DEFAULT')
+      .update('\0')
+      .update(context.prompt)
+      .digest('hex');
     const now = Date.now();
     const cached = this.decisionCache.get(key);
     if (cached && cached.expiresAt > now) {
@@ -124,7 +198,7 @@ export class ResolutionService {
       const result = await request;
       const isReusable =
         result.decision.data.postcode !== '00000' &&
-        result.decision.confidence_score >= this.config.CONFIDENCE_THRESHOLD;
+        result.decision.confidence_score >= confidenceThreshold;
       if (this.config.MODEL_CACHE_TTL_SECONDS > 0 && isReusable) {
         while (this.decisionCache.size >= this.config.MODEL_CACHE_MAX_ENTRIES) {
           const oldestKey = this.decisionCache.keys().next().value as string | undefined;
@@ -145,18 +219,50 @@ export class ResolutionService {
   async resolve(request: ResolutionRequest): Promise<ResolutionResponse> {
     const requestId = randomUUID();
     const address = preprocessAddress(request.address, this.config.SANITIZE_ENABLED);
-    const modelStartedAt = Date.now();
-    let responseUsage = this.buildUsage(emptyModelUsage(), false, 0);
+    address.rules.push(`REQUEST_COUNTRY_CODE:${request.country_code ?? 'NONE'}`);
+    const requestStartedAt = Date.now();
+    let responseUsage: ResolutionUsage = {
+      provider: this.provider.name,
+      model: this.provider.model,
+      cache_hit: false,
+      latency_ms: 0,
+      ...emptyModelUsage(),
+      estimated_list_cost_usd: 0,
+      cost_is_estimate: true,
+    };
+    let resolutionSettings: CountryResolutionSettings | undefined;
 
     try {
-      const promptTemplate = this.config.MODEL_PROMPT_TEMPLATE?.trim() || DEFAULT_PROMPT;
-      const { result, cacheHit } = await this.resolveWithCache({
-        address,
-        phone: request.phone,
-        prompt: renderPrompt(promptTemplate, address, request.phone),
-      });
+      const [selectedResolutionSettings, pricingSettings] = await Promise.all([
+        this.getResolutionSettings(request.country_code ?? 'DEFAULT'),
+        this.getModelPricing(),
+      ]);
+      resolutionSettings = selectedResolutionSettings;
+      address.rules.push(`SETTINGS_COUNTRY_CODE:${resolutionSettings.countryCode}`);
+      address.rules.push(`CONFIDENCE_THRESHOLD:${resolutionSettings.confidenceThreshold}`);
+      address.rules.push(`PRICING_SETTINGS:${pricingSettings.provider}/${pricingSettings.model}`);
+      const modelStartedAt = Date.now();
+      const { result, cacheHit } = await this.resolveWithCache(
+        {
+          address,
+          phone: request.phone,
+          countryCode: request.country_code,
+          prompt: renderPrompt(
+            resolutionSettings.promptTemplate,
+            address,
+            request.phone,
+            request.country_code,
+          ),
+        },
+        resolutionSettings.confidenceThreshold,
+      );
       const { decision } = result;
-      responseUsage = this.buildUsage(result.usage, cacheHit, Date.now() - modelStartedAt);
+      responseUsage = this.buildUsage(
+        result.usage,
+        cacheHit,
+        Date.now() - modelStartedAt,
+        pricingSettings,
+      );
       address.rules.push(`MODEL_CACHE_HIT:${cacheHit}`);
       const modelPostcodeReference =
         decision.data.country_code === 'MY' && /^\d{5}$/.test(decision.data.postcode)
@@ -171,7 +277,8 @@ export class ResolutionService {
       const hasResolvedPostcode = decision.data.postcode !== '00000';
       const response: ResolutionResponse = {
         status:
-          hasResolvedPostcode && decision.confidence_score >= this.config.CONFIDENCE_THRESHOLD
+          hasResolvedPostcode &&
+          decision.confidence_score >= resolutionSettings.confidenceThreshold
             ? 'SUCCESS'
             : 'AMBIGUOUS',
         confidence_score: decision.confidence_score,
@@ -189,6 +296,9 @@ export class ResolutionService {
       await this.database.writeResolutionLog({
         id: requestId,
         resourceId: request.resource_id,
+        requestCountryCode: request.country_code,
+        settingsCountryCode: resolutionSettings.countryCode,
+        confidenceThreshold: resolutionSettings.confidenceThreshold,
         requestAddress: request.address,
         requestPhone: request.phone,
         sanitizedAddress: address.value,
@@ -202,7 +312,7 @@ export class ResolutionService {
       return response;
     } catch (error) {
       if (responseUsage.latency_ms === 0) {
-        responseUsage = this.buildUsage(emptyModelUsage(), false, Date.now() - modelStartedAt);
+        responseUsage = { ...responseUsage, latency_ms: Date.now() - requestStartedAt };
       }
       const response: ResolutionResponse = {
         status: 'FAILED',
@@ -221,6 +331,9 @@ export class ResolutionService {
       await this.database.writeResolutionLog({
         id: requestId,
         resourceId: request.resource_id,
+        requestCountryCode: request.country_code,
+        settingsCountryCode: resolutionSettings?.countryCode,
+        confidenceThreshold: resolutionSettings?.confidenceThreshold,
         requestAddress: request.address,
         requestPhone: request.phone,
         sanitizedAddress: address.value,
