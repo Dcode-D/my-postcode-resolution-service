@@ -1,9 +1,11 @@
-import type { ModelDecision, ModelUsage } from '../types.js';
-import type { ModelProvider, ResolutionContext } from './model-provider.js';
+import { DEFAULT_NOT_FOUND_POSTCODE } from '../../constants/postcode.js';
+import type { ModelDecision, ModelUsage } from '../../types.js';
+import type { ModelProvider, ResolutionContext } from '../core/model-provider.js';
+import { AI_PROVIDER_NAMES } from '../core/provider-names.js';
 
 /** Deterministic local provider for development, tests, and no-key Docker start. */
 export class MockProvider implements ModelProvider {
-  readonly name = 'mock';
+  readonly name = AI_PROVIDER_NAMES.MOCK;
   readonly model = 'deterministic-v1';
 
   async resolve(
@@ -13,16 +15,16 @@ export class MockProvider implements ModelProvider {
     if (!postcode) {
       return {
         decision: {
-          confidence_score: 0.2,
+          confidenceScore: 0.2,
           data: {
-            address_line1: context.address.value,
+            addressLine1: context.address.value,
             district: '',
             city: '',
             state: '',
-            postcode: '00000',
-            central_postcode: '00000',
+            postcode: DEFAULT_NOT_FOUND_POSTCODE,
+            centralPostcode: DEFAULT_NOT_FOUND_POSTCODE,
             country: 'UNKNOWN',
-            country_code: 'ZZ',
+            countryCode: 'ZZ',
             phone: context.phone,
           },
           reasons: ['No verified postcode was available.'],
@@ -32,16 +34,16 @@ export class MockProvider implements ModelProvider {
     }
     return {
       decision: {
-        confidence_score: 0.55,
+        confidenceScore: 0.55,
         data: {
-          address_line1: context.address.value,
+          addressLine1: context.address.value,
           district: '',
           city: '',
           state: '',
           postcode,
-          central_postcode: postcode,
+          centralPostcode: postcode,
           country: 'UNKNOWN',
-          country_code: 'ZZ',
+          countryCode: 'ZZ',
           phone: context.phone,
         },
         reasons: ['Unverified postcode found in address.'],
@@ -53,12 +55,12 @@ export class MockProvider implements ModelProvider {
 
 function emptyUsage(): ModelUsage {
   return {
-    prompt_tokens: 0,
-    cached_prompt_tokens: 0,
-    output_tokens: 0,
-    thinking_tokens: 0,
-    tool_tokens: 0,
-    total_tokens: 0,
-    search_queries: 0,
+    promptTokens: 0,
+    cachedPromptTokens: 0,
+    outputTokens: 0,
+    thinkingTokens: 0,
+    toolTokens: 0,
+    totalTokens: 0,
+    searchQueries: 0,
   };
 }

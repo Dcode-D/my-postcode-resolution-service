@@ -1,0 +1,1 @@
+export const DEFAULT_NOT_FOUND_POSTCODE = '00000';

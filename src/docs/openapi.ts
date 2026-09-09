@@ -1,3 +1,5 @@
+import { AI_PROVIDER_NAME_VALUES } from '../providers/core/provider-names.js';
+
 export const openApiDocument = {
   openapi: '3.0.3',
   info: {
@@ -276,7 +278,7 @@ export const openApiDocument = {
         type: 'object',
         required: ['provider', 'model', 'source'],
         properties: {
-          provider: { type: 'string', enum: ['gemini', 'openai', 'deepseek', 'mock'] },
+          provider: { type: 'string', enum: AI_PROVIDER_NAME_VALUES },
           model: { type: 'string' },
           source: { type: 'string', enum: ['database', 'environment'] },
         },

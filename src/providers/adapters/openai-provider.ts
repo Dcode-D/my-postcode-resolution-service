@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
-import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../types.js';
-import { decisionJsonSchema } from './decision-schema.js';
-import type { ModelProvider, ResolutionContext } from './model-provider.js';
+import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../../types.js';
+import { decisionJsonSchema } from '../core/decision-schema.js';
+import type { ModelProvider, ResolutionContext } from '../core/model-provider.js';
+import { AI_PROVIDER_NAMES } from '../core/provider-names.js';
 
 export class OpenAIProvider implements ModelProvider {
-  readonly name = 'openai';
+  readonly name = AI_PROVIDER_NAMES.OPENAI;
   private readonly client: OpenAI;
 
   constructor(
@@ -40,19 +41,19 @@ export class OpenAIProvider implements ModelProvider {
       return {
         decision: modelDecisionSchema.parse(JSON.parse(result.output_text)),
         usage: {
-          prompt_tokens: usage?.input_tokens ?? 0,
-          cached_prompt_tokens: usage?.input_tokens_details?.cached_tokens ?? 0,
-          output_tokens: Math.max(0, (usage?.output_tokens ?? 0) - reasoningTokens),
-          thinking_tokens: reasoningTokens,
-          tool_tokens: 0,
-          total_tokens: usage?.total_tokens ?? 0,
-          search_queries: result.output.filter((item) => item.type === 'web_search_call').length,
+          promptTokens: usage?.input_tokens ?? 0,
+          cachedPromptTokens: usage?.input_tokens_details?.cached_tokens ?? 0,
+          outputTokens: Math.max(0, (usage?.output_tokens ?? 0) - reasoningTokens),
+          thinkingTokens: reasoningTokens,
+          toolTokens: 0,
+          totalTokens: usage?.total_tokens ?? 0,
+          searchQueries: result.output.filter((item) => item.type === 'web_search_call').length,
         },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(
-        JSON.stringify({ level: 'error', component: 'openai', model: this.model, message }),
+        JSON.stringify({ level: 'error', component: this.name, model: this.model, message }),
       );
       throw new Error(`OpenAI generation failed for ${this.model}: ${message}`);
     }

@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { toResolutionResponseInput } from '../mappers/resolution-response-mapper.js';
 import type { ResolutionService } from '../services/resolution-service.js';
 import { resolutionRequestSchema } from '../types.js';
 
@@ -9,7 +10,9 @@ export function createResolvePostcodeHandler(
     try {
       const payload = resolutionRequestSchema.parse(request.body);
       const result = await resolutionService.resolve(payload);
-      response.status(result.status === 'FAILED' ? 502 : 200).json(result);
+      response
+        .status(result.status === 'FAILED' ? 502 : 200)
+        .json(toResolutionResponseInput(result));
     } catch (error) {
       next(error);
     }

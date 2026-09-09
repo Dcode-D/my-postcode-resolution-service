@@ -1,11 +1,12 @@
 import { Pool } from 'pg';
 import type { AppConfig } from '../config.js';
+import { toResolutionResponseInput } from '../mappers/resolution-response-mapper.js';
+import { resolutionResponseSchema } from '../types.js';
 import type {
   AiProviderName,
   AiProviderSettings,
   CountryResolutionSettings,
   ModelPricingSettings,
-  PostcodeReference,
   ResolutionLog,
   ResolutionLogQuery,
   ResolutionResponse,
@@ -23,26 +24,6 @@ export class Database {
 
   async healthcheck(): Promise<void> {
     await this.pool.query('SELECT 1');
-  }
-
-  async findPostcode(postcode: string): Promise<PostcodeReference | null> {
-    const result = await this.pool.query<PostcodeReference>(
-      `SELECT postcode, state, city, district
-       FROM malaysia_postcode_references WHERE postcode = $1 LIMIT 1`,
-      [postcode],
-    );
-    return result.rows[0] ?? null;
-  }
-
-  async findPostcodeByRegion(state: string, city: string): Promise<PostcodeReference | null> {
-    const result = await this.pool.query<PostcodeReference>(
-      `SELECT postcode, state, city, district
-       FROM malaysia_postcode_references
-       WHERE upper(state) = upper($1) AND upper(city) = upper($2)
-       ORDER BY postcode LIMIT 1`,
-      [state, city],
-    );
-    return result.rows[0] ?? null;
   }
 
   async getResolutionSettings(countryCode: string): Promise<CountryResolutionSettings | null> {
@@ -169,19 +150,19 @@ export class Database {
         input.provider,
         input.model,
         input.result.status,
-        input.result.confidence_score,
-        JSON.stringify(input.result),
+        input.result.confidenceScore,
+        JSON.stringify(toResolutionResponseInput(input.result)),
         JSON.stringify(input.rules),
-        input.usage.cache_hit,
-        input.usage.latency_ms,
-        input.usage.prompt_tokens,
-        input.usage.cached_prompt_tokens,
-        input.usage.output_tokens,
-        input.usage.thinking_tokens,
-        input.usage.tool_tokens,
-        input.usage.total_tokens,
-        input.usage.search_queries,
-        input.usage.estimated_list_cost_usd,
+        input.usage.cacheHit,
+        input.usage.latencyMs,
+        input.usage.promptTokens,
+        input.usage.cachedPromptTokens,
+        input.usage.outputTokens,
+        input.usage.thinkingTokens,
+        input.usage.toolTokens,
+        input.usage.totalTokens,
+        input.usage.searchQueries,
+        input.usage.estimatedListCostUsd,
         input.errorCode ?? null,
       ],
     );
@@ -200,7 +181,7 @@ export class Database {
     }
     values.push(query.limit);
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await this.pool.query<ResolutionLog>(
+    const result = await this.pool.query<Omit<ResolutionLog, 'result'> & { result: unknown }>(
       `SELECT id,
               resource_id AS "resourceId",
               request_country_code AS "requestCountryCode",
@@ -234,7 +215,10 @@ export class Database {
        LIMIT $${values.length}`,
       values,
     );
-    return result.rows;
+    return result.rows.map((row) => ({
+      ...row,
+      result: resolutionResponseSchema.parse(row.result),
+    }));
   }
 
   async getResolutionStats(query: ResolutionStatsQuery): Promise<ResolutionStats> {

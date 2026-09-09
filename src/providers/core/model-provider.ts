@@ -1,5 +1,5 @@
-import type { ModelDecision, ModelUsage } from '../types.js';
-import type { PreprocessedAddress } from '../lib/address.js';
+import type { PreprocessedAddress } from '../../lib/address.js';
+import type { ModelDecision, ModelUsage } from '../../types.js';
 
 export interface ResolutionContext {
   address: PreprocessedAddress;

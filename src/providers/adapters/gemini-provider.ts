@@ -1,10 +1,11 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../types.js';
-import { decisionJsonSchema } from './decision-schema.js';
-import type { ModelProvider, ResolutionContext } from './model-provider.js';
+import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../../types.js';
+import { decisionJsonSchema } from '../core/decision-schema.js';
+import type { ModelProvider, ResolutionContext } from '../core/model-provider.js';
+import { AI_PROVIDER_NAMES } from '../core/provider-names.js';
 
 export class GeminiProvider implements ModelProvider {
-  readonly name = 'gemini';
+  readonly name = AI_PROVIDER_NAMES.GEMINI;
   private readonly client: GoogleGenAI;
 
   constructor(
@@ -42,20 +43,20 @@ export class GeminiProvider implements ModelProvider {
       return {
         decision: modelDecisionSchema.parse(JSON.parse(text)),
         usage: {
-          prompt_tokens: metadata?.promptTokenCount ?? 0,
-          cached_prompt_tokens: metadata?.cachedContentTokenCount ?? 0,
-          output_tokens: metadata?.candidatesTokenCount ?? 0,
-          thinking_tokens: metadata?.thoughtsTokenCount ?? 0,
-          tool_tokens: metadata?.toolUsePromptTokenCount ?? 0,
-          total_tokens: metadata?.totalTokenCount ?? 0,
-          search_queries: searchQueries,
+          promptTokens: metadata?.promptTokenCount ?? 0,
+          cachedPromptTokens: metadata?.cachedContentTokenCount ?? 0,
+          outputTokens: metadata?.candidatesTokenCount ?? 0,
+          thinkingTokens: metadata?.thoughtsTokenCount ?? 0,
+          toolTokens: metadata?.toolUsePromptTokenCount ?? 0,
+          totalTokens: metadata?.totalTokenCount ?? 0,
+          searchQueries,
         },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // Do not log prompt, address, phone, or API key. The provider error is enough to diagnose quota/model issues.
       console.error(
-        JSON.stringify({ level: 'error', component: 'gemini', model: this.model, message }),
+        JSON.stringify({ level: 'error', component: this.name, model: this.model, message }),
       );
       throw new Error(`Gemini generation failed for ${this.model}: ${message}`);
     }

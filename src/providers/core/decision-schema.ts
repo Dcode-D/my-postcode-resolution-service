@@ -1,3 +1,5 @@
+import { DEFAULT_NOT_FOUND_POSTCODE } from '../../constants/postcode.js';
+
 export const decisionJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -13,7 +15,7 @@ export const decisionJsonSchema = {
         state: { type: 'string' },
         postcode: {
           type: 'string',
-          description: 'Postal code in the target country format, or 00000 when unverified',
+          description: `Postal code in the target country format, or ${DEFAULT_NOT_FOUND_POSTCODE} when unverified`,
         },
         central_postcode: { type: 'string', description: 'The same value as postcode' },
         country: { type: 'string', description: 'Canonical country name' },

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { AI_PROVIDER_NAMES, AI_PROVIDER_NAME_VALUES } from './providers/core/provider-names.js';
 
 const boolFromEnv = z.preprocess(
   (value) => (value === undefined ? undefined : String(value).toLowerCase() === 'true'),
@@ -19,7 +20,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().min(1),
   SANITIZE_ENABLED: boolFromEnv,
-  MODELS_DEFAULT_PROVIDER: z.enum(['gemini', 'openai', 'deepseek', 'mock']).default('mock'),
+  MODELS_DEFAULT_PROVIDER: z.enum(AI_PROVIDER_NAME_VALUES).default(AI_PROVIDER_NAMES.MOCK),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-3.5-flash'),
   OPENAI_API_KEY: z.string().optional(),

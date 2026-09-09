@@ -1,7 +1,8 @@
 import OpenAI from 'openai';
-import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../types.js';
-import { decisionJsonInstruction } from './decision-schema.js';
-import type { ModelProvider, ResolutionContext } from './model-provider.js';
+import { modelDecisionSchema, type ModelDecision, type ModelUsage } from '../../types.js';
+import { decisionJsonInstruction } from '../core/decision-schema.js';
+import type { ModelProvider, ResolutionContext } from '../core/model-provider.js';
+import { AI_PROVIDER_NAMES } from '../core/provider-names.js';
 
 interface DeepSeekUsage {
   prompt_tokens?: number;
@@ -12,7 +13,7 @@ interface DeepSeekUsage {
 }
 
 export class DeepSeekProvider implements ModelProvider {
-  readonly name = 'deepseek';
+  readonly name = AI_PROVIDER_NAMES.DEEPSEEK;
   private readonly client: OpenAI;
 
   constructor(
@@ -45,19 +46,19 @@ export class DeepSeekProvider implements ModelProvider {
       return {
         decision: modelDecisionSchema.parse(JSON.parse(text)),
         usage: {
-          prompt_tokens: usage?.prompt_tokens ?? 0,
-          cached_prompt_tokens: usage?.prompt_cache_hit_tokens ?? 0,
-          output_tokens: Math.max(0, (usage?.completion_tokens ?? 0) - reasoningTokens),
-          thinking_tokens: reasoningTokens,
-          tool_tokens: 0,
-          total_tokens: usage?.total_tokens ?? 0,
-          search_queries: 0,
+          promptTokens: usage?.prompt_tokens ?? 0,
+          cachedPromptTokens: usage?.prompt_cache_hit_tokens ?? 0,
+          outputTokens: Math.max(0, (usage?.completion_tokens ?? 0) - reasoningTokens),
+          thinkingTokens: reasoningTokens,
+          toolTokens: 0,
+          totalTokens: usage?.total_tokens ?? 0,
+          searchQueries: 0,
         },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(
-        JSON.stringify({ level: 'error', component: 'deepseek', model: this.model, message }),
+        JSON.stringify({ level: 'error', component: this.name, model: this.model, message }),
       );
       throw new Error(`DeepSeek generation failed for ${this.model}: ${message}`);
     }
