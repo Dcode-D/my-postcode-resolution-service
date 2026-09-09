@@ -8,7 +8,6 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "migrate": "node dist/scripts/migrate.js",
-    "seed": "node dist/scripts/seed.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",

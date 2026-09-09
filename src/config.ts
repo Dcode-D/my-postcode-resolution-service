@@ -31,7 +31,6 @@ const envSchema = z.object({
   DEEPSEEK_BASE_URL: z.string().url().default('https://api.deepseek.com'),
   PROVIDER_CONFIG_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
   RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
-  MODEL_PRICING_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
   MODEL_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(604800).default(86400),
   MODEL_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).max(100000).default(1000),
   LOGS_API_KEY: optionalSecretFromEnv,

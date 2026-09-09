@@ -72,7 +72,8 @@ export const openApiDocument = {
           },
           '400': { $ref: '#/components/responses/InvalidRequest' },
           '429': {
-            description: 'Nginx rejected the request because a rate or connection limit was reached.',
+            description:
+              'Nginx rejected the request because a rate or connection limit was reached.',
             headers: {
               'Retry-After': {
                 description: 'Suggested number of seconds before retrying.',
@@ -166,7 +167,7 @@ export const openApiDocument = {
         tags: ['Operations'],
         summary: 'Reload runtime configuration',
         description:
-          'Immediately clears the country-settings and model-pricing caches and reloads the ordered provider chain from PostgreSQL. It does not call an AI provider.',
+          'Immediately clears the country-settings cache and reloads the ordered provider, model, and pricing configuration from PostgreSQL. It does not call an AI provider.',
         operationId: 'reloadConfiguration',
         security: [{ ApiKeyAuth: [] }],
         responses: {
@@ -426,7 +427,8 @@ export const openApiDocument = {
           settingsCountryCode: {
             type: 'string',
             nullable: true,
-            description: 'The matched ISO country code, or DEFAULT when fallback settings were used.',
+            description:
+              'The matched ISO country code, or DEFAULT when fallback settings were used.',
           },
           confidenceThreshold: {
             nullable: true,

@@ -13,8 +13,6 @@ const testUsage = {
   searchQueries: 1,
 };
 const pricing = {
-  provider: 'test',
-  model: 'DEFAULT',
   inputPricePerMillionUsd: 1.5,
   cachedInputPricePerMillionUsd: 0.15,
   outputPricePerMillionUsd: 9,
@@ -46,13 +44,13 @@ const selectProvider = (selectedProvider: ModelProvider): ModelProviderSelector 
   getProviders: async () => [
     {
       provider: selectedProvider,
+      pricing,
       fingerprint: `${selectedProvider.name}/${selectedProvider.model}`,
       source: 'environment',
     },
   ],
 });
 const store: ResolutionStore = {
-  getModelPricing: async () => pricing,
   getResolutionSettings: async (countryCode) => ({
     countryCode: countryCode === '60' ? '60' : 'DEFAULT',
     promptTemplate:
@@ -67,7 +65,6 @@ describe('ResolutionService', () => {
     const service = new ResolutionService(store, selectProvider(provider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
-      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
     });
@@ -119,7 +116,6 @@ describe('ResolutionService', () => {
     const service = new ResolutionService(store, selectProvider(internationalProvider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
-      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
     });
@@ -149,7 +145,6 @@ describe('ResolutionService', () => {
     const service = new ResolutionService(store, selectProvider(countingProvider), {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
-      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
     });
@@ -213,6 +208,7 @@ describe('ResolutionService', () => {
       getProviders: async () =>
         [failingProvider, ambiguousProvider, unusedProvider].map((selectedProvider) => ({
           provider: selectedProvider,
+          pricing,
           fingerprint: `${selectedProvider.name}/${selectedProvider.model}`,
           source: 'database' as const,
         })),
@@ -220,7 +216,6 @@ describe('ResolutionService', () => {
     const service = new ResolutionService(store, selector, {
       SANITIZE_ENABLED: true,
       RESOLUTION_SETTINGS_CACHE_TTL_SECONDS: 300,
-      MODEL_PRICING_CACHE_TTL_SECONDS: 3600,
       MODEL_CACHE_TTL_SECONDS: 86400,
       MODEL_CACHE_MAX_ENTRIES: 1000,
     });

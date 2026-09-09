@@ -13,7 +13,6 @@ import type {
 import type {
   CountryResolutionSettings,
   ModelDecision,
-  ModelPricingSettings,
   ResolutionRequest,
   ResolutionResponse,
   ResolutionUsage,
@@ -32,7 +31,6 @@ export interface ReloadConfigurationResult {
 
 export interface ResolutionStore {
   getResolutionSettings(countryCode: string): Promise<CountryResolutionSettings | null>;
-  getModelPricing(provider: string, model: string): Promise<ModelPricingSettings | null>;
   writeResolutionLog(input: {
     id: string;
     resourceId?: string;
@@ -57,8 +55,6 @@ export class ResolutionService {
   private readonly inFlightDecisions: NodeCache;
   private readonly resolutionSettingsCache: NodeCache;
   private readonly inFlightSettings = new Map<string, Promise<CountryResolutionSettings>>();
-  private readonly modelPricingCache: NodeCache;
-  private readonly inFlightPricing = new Map<string, Promise<ModelPricingSettings>>();
   private configurationGeneration = 0;
 
   constructor(
@@ -68,7 +64,6 @@ export class ResolutionService {
       AppConfig,
       | 'SANITIZE_ENABLED'
       | 'RESOLUTION_SETTINGS_CACHE_TTL_SECONDS'
-      | 'MODEL_PRICING_CACHE_TTL_SECONDS'
       | 'MODEL_CACHE_TTL_SECONDS'
       | 'MODEL_CACHE_MAX_ENTRIES'
     >,
@@ -87,11 +82,6 @@ export class ResolutionService {
     this.resolutionSettingsCache = new NodeCache({
       stdTTL: config.RESOLUTION_SETTINGS_CACHE_TTL_SECONDS,
       checkperiod: Math.min(config.RESOLUTION_SETTINGS_CACHE_TTL_SECONDS, 120),
-      useClones: false,
-    });
-    this.modelPricingCache = new NodeCache({
-      stdTTL: config.MODEL_PRICING_CACHE_TTL_SECONDS,
-      checkperiod: Math.min(config.MODEL_PRICING_CACHE_TTL_SECONDS, 600),
       useClones: false,
     });
   }
@@ -119,32 +109,6 @@ export class ResolutionService {
     } finally {
       if (this.inFlightSettings.get(countryCode) === request) {
         this.inFlightSettings.delete(countryCode);
-      }
-    }
-  }
-
-  private async getModelPricing(provider: ModelProvider): Promise<ModelPricingSettings> {
-    const key = `${provider.name}\0${provider.model}`;
-    const cached = this.modelPricingCache.get<ModelPricingSettings>(key);
-    if (cached) return cached;
-
-    const inFlight = this.inFlightPricing.get(key);
-    if (inFlight) return inFlight;
-
-    const requestGeneration = this.configurationGeneration;
-    const request = this.database.getModelPricing(provider.name, provider.model).then((pricing) => {
-      if (!pricing) throw new Error('No model pricing settings are configured');
-      if (requestGeneration === this.configurationGeneration) {
-        this.modelPricingCache.set(key, pricing);
-      }
-      return pricing;
-    });
-    this.inFlightPricing.set(key, request);
-    try {
-      return await request;
-    } finally {
-      if (this.inFlightPricing.get(key) === request) {
-        this.inFlightPricing.delete(key);
       }
     }
   }
@@ -198,9 +162,7 @@ export class ResolutionService {
   async reloadConfiguration(): Promise<ReloadConfigurationResult> {
     this.configurationGeneration += 1;
     this.resolutionSettingsCache.flushAll();
-    this.modelPricingCache.flushAll();
     this.inFlightSettings.clear();
-    this.inFlightPricing.clear();
     const selections = await this.providerSelector.getProviders(true);
     return {
       reloadedAt: new Date().toISOString(),
@@ -263,7 +225,6 @@ export class ResolutionService {
       const selections = await this.providerSelector.getProviders();
       const providerChainDependencies = {
         attemptedFingerprints,
-        getPricing: (provider) => this.getModelPricing(provider),
         resolve: (provider) =>
           this.resolveWithCache(provider, providerContext, confidenceThreshold),
         injectRule: (rule) => address.rules.push(rule),
@@ -278,7 +239,10 @@ export class ResolutionService {
         throw attempt.lastError ?? new Error('No configured AI provider returned a valid response');
       }
 
-      const { provider: respondingProvider, pricingSettings, resolved } = attempt.outcome;
+      const {
+        selection: { provider: respondingProvider, pricing },
+        resolved,
+      } = attempt.outcome;
       activeProvider = respondingProvider;
       responseUsage = {
         ...responseUsage,
@@ -292,7 +256,7 @@ export class ResolutionService {
         result.usage,
         cacheHit,
         Date.now() - modelStartedAt,
-        pricingSettings,
+        pricing,
       );
       address.rules.push(`MODEL_CACHE_HIT:${cacheHit}`);
       const hasResolvedPostcode = decision.data.postcode !== DEFAULT_NOT_FOUND_POSTCODE;

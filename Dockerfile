@@ -14,4 +14,4 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
 EXPOSE 3000
-CMD ["sh", "-c", "npm run migrate && npm run seed && npm start"]
+CMD ["sh", "-c", "npm run migrate && npm start"]

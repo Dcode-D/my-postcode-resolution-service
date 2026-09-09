@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AppConfig } from '../../config.js';
-import type { AiProviderSettings } from '../../types.js';
+import type { AiProviderSettings, ModelPricingSettings } from '../../types.js';
 import { DeepSeekProvider } from '../adapters/deepseek-provider.js';
 import { GeminiProvider } from '../adapters/gemini-provider.js';
 import { MockProvider } from '../adapters/mock-provider.js';
@@ -12,6 +12,7 @@ export type ProviderConfigSource = 'database' | 'environment';
 
 export interface SelectedModelProvider {
   provider: ModelProvider;
+  pricing: ModelPricingSettings;
   fingerprint: string;
   source: ProviderConfigSource;
 }
@@ -48,10 +49,12 @@ export function withEnvironmentApiKey(
 
 export function getEnvironmentFallback(
   config: ProviderSelectorConfig,
+  storedSettings?: AiProviderSettings,
 ): ResolvedProviderSettings {
   const provider = config.MODELS_DEFAULT_PROVIDER;
   const sharedSettings = {
     provider,
+    enabled: true,
     apiKey: getEnvironmentApiKey(provider, config),
     priority: 0,
     source: 'environment' as const,
@@ -59,21 +62,33 @@ export function getEnvironmentFallback(
 
   switch (provider) {
     case AI_PROVIDER_NAMES.GEMINI:
-      return { ...sharedSettings, model: config.GEMINI_MODEL, baseUrl: null };
+      return {
+        ...sharedSettings,
+        model: config.GEMINI_MODEL,
+        baseUrl: null,
+        pricing: getStoredPricing(storedSettings, config.GEMINI_MODEL),
+      };
     case AI_PROVIDER_NAMES.OPENAI:
       return {
         ...sharedSettings,
         model: config.OPENAI_MODEL,
         baseUrl: config.OPENAI_BASE_URL ?? null,
+        pricing: getStoredPricing(storedSettings, config.OPENAI_MODEL),
       };
     case AI_PROVIDER_NAMES.DEEPSEEK:
       return {
         ...sharedSettings,
         model: config.DEEPSEEK_MODEL,
         baseUrl: config.DEEPSEEK_BASE_URL,
+        pricing: getStoredPricing(storedSettings, config.DEEPSEEK_MODEL),
       };
     case AI_PROVIDER_NAMES.MOCK:
-      return { ...sharedSettings, model: new MockProvider().model, baseUrl: null };
+      return {
+        ...sharedSettings,
+        model: new MockProvider().model,
+        baseUrl: null,
+        pricing: ZERO_PRICING,
+      };
   }
 }
 
@@ -85,9 +100,24 @@ export function createProviderSelection(
 
   return {
     provider,
+    pricing: settings.pricing,
     source: settings.source,
     fingerprint: createProviderFingerprint(settings),
   };
+}
+
+const ZERO_PRICING: ModelPricingSettings = {
+  inputPricePerMillionUsd: 0,
+  cachedInputPricePerMillionUsd: 0,
+  outputPricePerMillionUsd: 0,
+  searchPricePerThousandUsd: 0,
+};
+
+function getStoredPricing(
+  settings: AiProviderSettings | undefined,
+  model: string,
+): ModelPricingSettings {
+  return settings?.model === model ? settings.pricing : ZERO_PRICING;
 }
 
 function getEnvironmentApiKey(

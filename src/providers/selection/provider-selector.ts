@@ -16,7 +16,7 @@ export interface ModelProviderSelector {
 }
 
 export interface ProviderSettingsStore {
-  listEnabledProviderSettings(): Promise<AiProviderSettings[]>;
+  listProviderSettings(): Promise<AiProviderSettings[]>;
 }
 
 export class NoProviderConfiguredError extends Error {
@@ -68,11 +68,19 @@ export class CachedModelProviderSelector implements ModelProviderSelector {
   }
 
   private async loadProviders(): Promise<SelectedModelProvider[]> {
-    const databaseSettings = await this.database.listEnabledProviderSettings();
+    const databaseSettings = await this.database.listProviderSettings();
+    const enabledSettings = databaseSettings.filter((settings) => settings.enabled);
     const settings =
-      databaseSettings.length > 0
-        ? databaseSettings.map((value) => withEnvironmentApiKey(value, this.config))
-        : [getEnvironmentFallback(this.config)];
+      enabledSettings.length > 0
+        ? enabledSettings.map((value) => withEnvironmentApiKey(value, this.config))
+        : [
+            getEnvironmentFallback(
+              this.config,
+              databaseSettings.find(
+                (settings) => settings.provider === this.config.MODELS_DEFAULT_PROVIDER,
+              ),
+            ),
+          ];
 
     const providers = settings
       .filter(

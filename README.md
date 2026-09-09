@@ -16,7 +16,7 @@ Nginx exposes the service at `http://localhost:3000` by default and proxies requ
 curl http://localhost:3000/health
 ```
 
-The container automatically runs all unapplied SQL migrations and the development seed before starting the API. Applied migrations are tracked in `schema_migrations`.
+The container automatically runs all unapplied SQL migrations before starting the API. Applied migrations are tracked in `schema_migrations`.
 
 Host ports are configured through `.env`:
 
@@ -66,6 +66,10 @@ UPDATE ai_provider_settings
 SET enabled = true,
     api_key = 'your-openai-key',
     model = 'gpt-5-mini',
+    input_price_per_million_usd = 0.25,
+    cached_input_price_per_million_usd = 0.025,
+    output_price_per_million_usd = 2,
+    search_price_per_thousand_usd = 10,
     priority = 10,
     updated_at = now()
 WHERE provider = 'openai';
@@ -89,7 +93,7 @@ DEEPSEEK_API_KEY=your-key
 DEEPSEEK_MODEL=deepseek-chat
 ```
 
-Provider settings are cached for `PROVIDER_CONFIG_CACHE_TTL_SECONDS`, which defaults to five minutes. If every provider in the cached chain fails, the service immediately reloads the database configuration and tries only providers whose provider, model, base URL, or API key changed. An unchanged failing configuration is not called twice for the same resolution request.
+Provider, model, and pricing settings are cached together for `PROVIDER_CONFIG_CACHE_TTL_SECONDS`, which defaults to five minutes. Changes take effect when that cache expires, the API restarts, or `POST /v1/config/reload` is called.
 
 In production, the `mock` provider is never considered usable. If no real provider is configured, or every configured provider fails to return a valid response, the resolution endpoint returns HTTP 502 with status `FAILED`. Development and test environments may still use `mock`.
 
@@ -118,9 +122,9 @@ The default cache lifetime is 24 hours with a maximum of 1,000 entries. Set `MOD
 
 ### Country prompts and confidence thresholds
 
-Prompts and minimum success thresholds are stored in `country_resolution_settings`. Migration `004_country_resolution_settings.sql` preserves the existing working prompt in the `DEFAULT` row. A request with a calling code first looks for that code and falls back to the unchanged default when no matching row exists. Requests without a calling code use `DEFAULT` directly.
+Prompts and minimum success thresholds are stored in `country_resolution_settings`. The initial migration creates the working prompt in the `DEFAULT` row. A request with a calling code first looks for that code and falls back to the unchanged default when no matching row exists. Requests without a calling code use `DEFAULT` directly.
 
-Migration `008_malaysia_resolution_settings.sql` adds a Malaysia-specific configuration for calling code `60`. It guides the model to validate Malaysian five-digit postcodes against the street, locality, and state while keeping the confidence threshold at `0.800`.
+The initial migration also adds a Malaysia-specific configuration for calling code `60`. It guides the model to validate Malaysian five-digit postcodes against the street, locality, and state while keeping the confidence threshold at `0.800`.
 
 The supported prompt placeholders are:
 
@@ -241,19 +245,19 @@ Usage information is stored only in the audit log. Dedicated database columns re
 - Estimated list cost in USD.
 - Requested international calling code, selected settings row, and the confidence threshold used.
 
-The cost is an estimate based on prices in `model_pricing_settings`, not the final Gemini invoice. Free quotas, discounts, and service-tier pricing are not deducted. Migration `006_model_pricing_settings.sql` stores the current Gemini defaults and a zero-cost global fallback.
+The cost is an estimate based on the pricing columns in `ai_provider_settings`, not the provider's final invoice. Free quotas, discounts, and service-tier pricing are not deducted. The initial migration supplies defaults for `gemini-3.5-flash`, `gpt-5-mini`, `deepseek-chat`, and the mock model.
 
 ```sql
-UPDATE model_pricing_settings
+UPDATE ai_provider_settings
 SET input_price_per_million_usd = 1.5,
     cached_input_price_per_million_usd = 0.15,
     output_price_per_million_usd = 9,
     search_price_per_thousand_usd = 14,
     updated_at = now()
-WHERE provider = 'gemini' AND model = 'DEFAULT';
+WHERE provider = 'gemini' AND model = 'gemini-3.5-flash';
 ```
 
-Pricing lookup prefers an exact provider/model row, then the provider's `DEFAULT` model row, and finally `DEFAULT`/`DEFAULT`. Migration `006_model_pricing_settings.sql` includes exact rows for the configured `gpt-5-mini` and `deepseek-chat` defaults. The global fallback remains zero for unknown provider/model combinations. Rows are cached in each API process for `MODEL_PRICING_CACHE_TTL_SECONDS`, which defaults to one hour. Update the row whenever the model, service tier, or pricing changes; the new values take effect after the cache expires, the API restarts, or `POST /v1/config/reload` is called.
+Pricing is loaded and cached together with the provider and model configuration. Update the model and its pricing columns together whenever the model, service tier, or prices change; the new values take effect after `PROVIDER_CONFIG_CACHE_TTL_SECONDS`, the API restarts, or `POST /v1/config/reload` is called.
 
 ### Resolution statistics
 
@@ -303,7 +307,7 @@ The time filters are applied first, followed by descending date order and the sa
 
 `POST /v1/config/reload`
 
-This protected endpoint immediately reloads the provider chain from PostgreSQL and clears the cached country prompt/threshold and model-pricing settings. It does not make an AI request and does not return API keys. It uses the same `x-api-key` authentication as the audit endpoints.
+This protected endpoint immediately reloads the combined provider, model, and pricing configuration from PostgreSQL and clears the cached country prompt and threshold settings. It does not make an AI request and does not return API keys. It uses the same `x-api-key` authentication as the audit endpoints.
 
 ```bash
 curl -X POST http://localhost:3000/v1/config/reload \
@@ -337,11 +341,9 @@ Example response:
 - `src/providers/`: provider adapters and the cached priority-ordered provider selector.
 - `src/services/resolution-service.ts`: provider-chain orchestration, caching, confidence status, usage accounting, and audit logging.
 - `migrations/`: ordered PostgreSQL schema migrations.
-- `malaysia_postcode_references`: development reference table containing only a small seed dataset, not the complete Pos Malaysia database.
 - `resolution_logs`: resolution audit records, provider usage, estimated cost, and error details.
 - `country_resolution_settings`: per-country prompt templates and confidence thresholds, including the default fallback.
-- `model_pricing_settings`: model token and search prices used for persisted cost estimates.
-- `ai_provider_settings`: enabled provider, model, base URL, priority, and optional API credentials.
+- `ai_provider_settings`: enabled provider, model, base URL, priority, pricing, and optional API credentials.
 
 ## Local development
 
@@ -349,7 +351,6 @@ Example response:
 npm install
 cp .env.example .env
 npm run migrate
-npm run seed
 npm run dev
 ```
 
@@ -363,7 +364,6 @@ npm run check
 
 Before production use:
 
-- Import properly licensed postal-reference data where local validation is required.
 - Add rate limiting and authentication to the public resolution endpoint.
 - Define retention, encryption, or tokenization policies for addresses and phone numbers under applicable privacy laws.
 - Keep `LOGS_API_KEY` secret and restrict access to audit and configuration-reload endpoints.

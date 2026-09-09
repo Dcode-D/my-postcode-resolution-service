@@ -6,7 +6,6 @@ import type {
   AiProviderName,
   AiProviderSettings,
   CountryResolutionSettings,
-  ModelPricingSettings,
   ResolutionLog,
   ResolutionLogQuery,
   ResolutionResponse,
@@ -51,64 +50,49 @@ export class Database {
       : null;
   }
 
-  async getModelPricing(provider: string, model: string): Promise<ModelPricingSettings | null> {
+  async listProviderSettings(): Promise<AiProviderSettings[]> {
     const result = await this.pool.query<{
-      provider: string;
+      provider: AiProviderName;
+      enabled: boolean;
+      apiKey: string | null;
       model: string;
+      baseUrl: string | null;
+      priority: number;
       inputPricePerMillionUsd: string | number;
       cachedInputPricePerMillionUsd: string | number;
       outputPricePerMillionUsd: string | number;
       searchPricePerThousandUsd: string | number;
     }>(
       `SELECT provider,
+              enabled,
+              api_key AS "apiKey",
               model,
+              base_url AS "baseUrl",
+              priority,
               input_price_per_million_usd AS "inputPricePerMillionUsd",
               cached_input_price_per_million_usd AS "cachedInputPricePerMillionUsd",
               output_price_per_million_usd AS "outputPricePerMillionUsd",
               search_price_per_thousand_usd AS "searchPricePerThousandUsd"
-       FROM model_pricing_settings
-       WHERE (provider = $1 AND model = $2)
-          OR (provider = $1 AND model = 'DEFAULT')
-          OR (provider = 'DEFAULT' AND model = 'DEFAULT')
-       ORDER BY CASE
-         WHEN provider = $1 AND model = $2 THEN 1
-         WHEN provider = $1 AND model = 'DEFAULT' THEN 2
-         ELSE 3
-       END
-       LIMIT 1`,
-      [provider, model],
-    );
-    const row = result.rows[0];
-    return row
-      ? {
-          provider: row.provider,
-          model: row.model,
-          inputPricePerMillionUsd: Number(row.inputPricePerMillionUsd),
-          cachedInputPricePerMillionUsd: Number(row.cachedInputPricePerMillionUsd),
-          outputPricePerMillionUsd: Number(row.outputPricePerMillionUsd),
-          searchPricePerThousandUsd: Number(row.searchPricePerThousandUsd),
-        }
-      : null;
-  }
-
-  async listEnabledProviderSettings(): Promise<AiProviderSettings[]> {
-    const result = await this.pool.query<{
-      provider: AiProviderName;
-      apiKey: string | null;
-      model: string;
-      baseUrl: string | null;
-      priority: number;
-    }>(
-      `SELECT provider,
-              api_key AS "apiKey",
-              model,
-              base_url AS "baseUrl",
-              priority
        FROM ai_provider_settings
-       WHERE enabled = true
        ORDER BY priority ASC, updated_at DESC, provider ASC`,
     );
-    return result.rows;
+    return result.rows.map(
+      ({
+        inputPricePerMillionUsd,
+        cachedInputPricePerMillionUsd,
+        outputPricePerMillionUsd,
+        searchPricePerThousandUsd,
+        ...settings
+      }) => ({
+        ...settings,
+        pricing: {
+          inputPricePerMillionUsd: Number(inputPricePerMillionUsd),
+          cachedInputPricePerMillionUsd: Number(cachedInputPricePerMillionUsd),
+          outputPricePerMillionUsd: Number(outputPricePerMillionUsd),
+          searchPricePerThousandUsd: Number(searchPricePerThousandUsd),
+        },
+      }),
+    );
   }
 
   async writeResolutionLog(input: {

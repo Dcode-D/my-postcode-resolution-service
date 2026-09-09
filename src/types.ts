@@ -175,8 +175,6 @@ export interface CountryResolutionSettings {
 }
 
 export interface ModelPricingSettings {
-  provider: string;
-  model: string;
   inputPricePerMillionUsd: number;
   cachedInputPricePerMillionUsd: number;
   outputPricePerMillionUsd: number;
@@ -185,10 +183,12 @@ export interface ModelPricingSettings {
 
 export interface AiProviderSettings {
   provider: AiProviderName;
+  enabled: boolean;
   apiKey: string | null;
   model: string;
   baseUrl: string | null;
   priority: number;
+  pricing: ModelPricingSettings;
 }
 
 export interface ResolutionLog {

@@ -3,11 +3,9 @@ import type {
   ModelProviderResult,
   SelectedModelProvider,
 } from '../../providers/index.js';
-import type { ModelPricingSettings } from '../../types.js';
 
 interface ProviderChainOutcome {
-  provider: ModelProvider;
-  pricingSettings: ModelPricingSettings;
+  selection: SelectedModelProvider;
   resolved: { result: ModelProviderResult; cacheHit: boolean };
 }
 
@@ -19,7 +17,6 @@ export interface ProviderChainAttempt {
 
 export interface ProviderChainDependencies {
   attemptedFingerprints: Set<string>;
-  getPricing: (provider: ModelProvider) => Promise<ModelPricingSettings>;
   resolve: (provider: ModelProvider) => Promise<{ result: ModelProviderResult; cacheHit: boolean }>;
   injectRule: (rule: string) => void;
 }
@@ -31,7 +28,7 @@ export async function tryProvidersSequentially({
   selections: SelectedModelProvider[];
   dependencies: ProviderChainDependencies;
 }): Promise<ProviderChainAttempt> {
-  const { attemptedFingerprints, getPricing, resolve, injectRule } = dependencies;
+  const { attemptedFingerprints, resolve, injectRule } = dependencies;
   let lastProvider: ModelProvider | undefined;
   let lastError: unknown;
 
@@ -43,12 +40,11 @@ export async function tryProvidersSequentially({
     injectRule(`PROVIDER_CONFIG_SOURCE:${selection.source}`);
 
     try {
-      const pricingSettings = await getPricing(lastProvider);
-      injectRule(`PRICING_SETTINGS:${pricingSettings.provider}/${pricingSettings.model}`);
+      injectRule(`PRICING_SETTINGS:${lastProvider.name}/${lastProvider.model}`);
       const resolved = await resolve(lastProvider);
       injectRule(`PROVIDER_RESPONDED:${lastProvider.name}/${lastProvider.model}`);
       return {
-        outcome: { provider: lastProvider, pricingSettings, resolved },
+        outcome: { selection, resolved },
         lastProvider,
       };
     } catch (error) {
